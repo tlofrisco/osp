@@ -25,8 +25,9 @@ async function createTableFromModel(blendedModel, prompt) {
 
   const refinedTables = {};
 
-  // First pass: Define main entities
+  // First pass: Define main entities with normalized names
   for (const [entityName, entity] of Object.entries(entities)) {
+    const normalizedEntityName = entityName.replace(/-/g, '_'); // Replace hyphens with underscores
     const columns = [];
     const attributes = entity.attributes || {};
     const seenColumns = new Set();
@@ -42,31 +43,35 @@ async function createTableFromModel(blendedModel, prompt) {
     seenColumns.add('id');
 
     for (const [attrName, attrType] of Object.entries(attributes)) {
+      const cleanName = attrName.replace(/^(sid_|arts_)/, '').replace(/-/g, '_'); // Normalize attribute names
       const sqlType = attrType === 'string' ? 'text' : attrType === 'date' ? 'date' : attrType === 'float' ? 'numeric' : attrType === 'int' ? 'integer' : attrType === 'list' ? 'text[]' : 'text';
-      const cleanName = attrName.replace(/^(sid_|arts_)/, '');
       if (!seenColumns.has(cleanName)) {
         columns.push({ name: cleanName, type: sqlType });
         seenColumns.add(cleanName);
       }
     }
 
-    refinedTables[entityName] = columns;
+    refinedTables[normalizedEntityName] = columns;
   }
 
-  // Second pass: Add relationships and referenced tables
+  // Second pass: Add relationships and referenced tables with normalized names
   for (const [entityName, entity] of Object.entries(entities)) {
-    const columns = refinedTables[entityName];
+    const normalizedEntityName = entityName.replace(/-/g, '_');
+    const columns = refinedTables[normalizedEntityName];
     const seenColumns = new Set(columns.map(c => c.name));
 
     if (entity.relationships) {
       for (const [relName, relTarget] of Object.entries(entity.relationships)) {
-        const cleanRelName = relName.replace(/^(sid_|arts_)/, '');
+        const cleanRelName = relName.replace(/^(sid_|arts_)/, '').replace(/-/g, '_'); // Normalize relationship names
         let targetName = relTarget;
 
         // Extract target from parentheses if present (e.g., "provider (sid_inventoryServiceProvider)")
         if (typeof relTarget === 'string' && relTarget.includes('(')) {
           targetName = relTarget.match(/\(([^)]+)\)/)?.[1] || relTarget;
         }
+
+        // Normalize target name
+        targetName = targetName.replace(/-/g, '_');
 
         if (targetName && !seenColumns.has(cleanRelName)) {
           columns.push({ name: cleanRelName, type: 'text', constraints: `REFERENCES ${targetName}(id)` });
@@ -128,7 +133,8 @@ export async function POST({ request }) {
     const blendResponse = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [{ role: 'user', content: combinedPrompt }],
-      max_tokens: 1000
+      max_tokens: 1000,
+      timeout: 8000 // 8 seconds to stay under Vercel's 10s limit
     });
     const rawBlendContent = blendResponse.choices[0].message.content;
     console.log('Raw blend response:', rawBlendContent);
@@ -144,14 +150,51 @@ export async function POST({ request }) {
     }
     console.log('Blended model:', blendedModel);
 
-    const serviceType = blendedModel.service_type || 'Unknown';
-    const entities = blendedModel.entities || {};
+    // Normalize table names (replace hyphens with underscores)
+    const normalizedModel = {
+      ...blendedModel,
+      service_type: blendedModel.service_type || 'Unknown',
+      entities: Object.fromEntries(
+        Object.entries(blendedModel.entities || {}).map(([key, value]) => {
+          const newKey = key.replace(/-/g, '_'); // e.g., sid_customer-support-service -> sid_customer_support_service
+          return [
+            newKey,
+            {
+              ...value,
+              attributes: Object.fromEntries(
+                Object.entries(value.attributes || {}).map(([attrKey, attrValue]) => [
+                  attrKey.replace(/-/g, '_'), // Normalize attribute names
+                  attrValue
+                ])
+              ),
+              relationships: Object.fromEntries(
+                Object.entries(value.relationships || {}).map(([relKey, relValue]) => {
+                  const newRelKey = relKey.replace(/-/g, '_'); // e.g., sid_provides-one-to-many -> sid_provides_one_to_many
+                  const newRelValue = typeof relValue === 'string' ? relValue.replace(/-/g, '_') : relValue;
+                  return [newRelKey, newRelValue];
+                })
+              ),
+              provider: value.provider ? value.provider.replace(/-/g, '_') : value.provider,
+              suppliers: Array.isArray(value.suppliers) ? value.suppliers.map(s => s.replace(/-/g, '_')) : value.suppliers,
+              consumers: Array.isArray(value.consumers) ? value.consumers.map(c => c.replace(/-/g, '_')) : value.consumers,
+            },
+          ];
+        })
+      ),
+      provider: blendedModel.provider ? blendedModel.provider.replace(/-/g, '_') : blendedModel.provider,
+      suppliers: Array.isArray(blendedModel.suppliers) ? blendedModel.suppliers.map(s => s.replace(/-/g, '_')) : blendedModel.suppliers,
+      consumers: Array.isArray(blendedModel.consumers) ? blendedModel.consumers.map(c => c.replace(/-/g, '_')) : blendedModel.consumers,
+    };
 
-    const specPrompt = `Generate a detailed spec for "${prompt}" based on this blended model: ${JSON.stringify(blendedModel)}.`;
+    const serviceType = normalizedModel.service_type;
+    const entities = normalizedModel.entities;
+
+    const specPrompt = `Generate a detailed spec for "${prompt}" based on this blended model: ${JSON.stringify(normalizedModel)}.`;
     const specResponse = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [{ role: 'user', content: specPrompt }],
-      max_tokens: 1000
+      max_tokens: 1000,
+      timeout: 8000 // 8 seconds to stay under Vercel's 10s limit
     });
     const spec = specResponse.choices[0].message.content;
     console.log('Generated spec:', spec);
@@ -159,25 +202,25 @@ export async function POST({ request }) {
     const { data: existingService } = await supabase.from('services').select('version').eq('prompt', prompt).order('version', { ascending: false }).limit(1);
     const version = (existingService?.[0]?.version || 0) + 1;
 
-    await createTableFromModel(blendedModel, prompt);
+    await createTableFromModel(normalizedModel, prompt);
 
     const { error } = await supabase.from('services').insert({
       prompt,
       spec,
       framework: 'Blended (TMForumSID+ARTS)',
-      provider: blendedModel.provider || 'OSP Inc',
-      suppliers: blendedModel.suppliers || ['generic-supplier'],
-      consumers: blendedModel.consumers || ['generic-consumer'],
+      provider: normalizedModel.provider || 'OSP_Inc', // Normalized
+      suppliers: normalizedModel.suppliers || ['generic_supplier'], // Normalized
+      consumers: normalizedModel.consumers || ['generic_consumer'], // Normalized
       version,
-      blended_model: blendedModel,
-      metadata: blendedModel.metadata || {}
+      blended_model: normalizedModel,
+      metadata: normalizedModel.metadata || {}
     });
     if (error) console.error('Supabase insert error:', error);
     else console.log('Inserted into services successfully');
 
     return json({ result: spec });
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Error:', error.message);
     return json({ error: error.message, details: error.stack }, { status: 500 });
   }
 }
