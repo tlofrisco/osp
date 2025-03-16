@@ -4,7 +4,11 @@ import 'dotenv/config';
 import { supabase } from '$lib/supabase';
 import { supabaseAdmin } from '$lib/supabaseAdmin';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Set timeout globally in the OpenAI client (8 seconds = 8000ms)
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  timeout: 8000 // Applies to all requests, keeps us under Vercel's 10s limit
+});
 
 async function createTableFromModel(blendedModel, prompt) {
   let entities = blendedModel.entities || {};
@@ -27,7 +31,7 @@ async function createTableFromModel(blendedModel, prompt) {
 
   // First pass: Define main entities with normalized names
   for (const [entityName, entity] of Object.entries(entities)) {
-    const normalizedEntityName = entityName.replace(/-/g, '_'); // Replace hyphens with underscores
+    const normalizedEntityName = entityName.replace(/-/g, '_');
     const columns = [];
     const attributes = entity.attributes || {};
     const seenColumns = new Set();
@@ -43,7 +47,7 @@ async function createTableFromModel(blendedModel, prompt) {
     seenColumns.add('id');
 
     for (const [attrName, attrType] of Object.entries(attributes)) {
-      const cleanName = attrName.replace(/^(sid_|arts_)/, '').replace(/-/g, '_'); // Normalize attribute names
+      const cleanName = attrName.replace(/^(sid_|arts_)/, '').replace(/-/g, '_');
       const sqlType = attrType === 'string' ? 'text' : attrType === 'date' ? 'date' : attrType === 'float' ? 'numeric' : attrType === 'int' ? 'integer' : attrType === 'list' ? 'text[]' : 'text';
       if (!seenColumns.has(cleanName)) {
         columns.push({ name: cleanName, type: sqlType });
@@ -62,15 +66,13 @@ async function createTableFromModel(blendedModel, prompt) {
 
     if (entity.relationships) {
       for (const [relName, relTarget] of Object.entries(entity.relationships)) {
-        const cleanRelName = relName.replace(/^(sid_|arts_)/, '').replace(/-/g, '_'); // Normalize relationship names
+        const cleanRelName = relName.replace(/^(sid_|arts_)/, '').replace(/-/g, '_');
         let targetName = relTarget;
 
-        // Extract target from parentheses if present (e.g., "provider (sid_inventoryServiceProvider)")
         if (typeof relTarget === 'string' && relTarget.includes('(')) {
           targetName = relTarget.match(/\(([^)]+)\)/)?.[1] || relTarget;
         }
 
-        // Normalize target name
         targetName = targetName.replace(/-/g, '_');
 
         if (targetName && !seenColumns.has(cleanRelName)) {
@@ -78,7 +80,6 @@ async function createTableFromModel(blendedModel, prompt) {
           seenColumns.add(cleanRelName);
         }
 
-        // Create referenced table if not already defined
         if (targetName && !refinedTables[targetName]) {
           refinedTables[targetName] = [
             { name: 'id', type: 'text', constraints: 'PRIMARY KEY' },
@@ -133,8 +134,7 @@ export async function POST({ request }) {
     const blendResponse = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [{ role: 'user', content: combinedPrompt }],
-      max_tokens: 1000,
-      timeout: 8000 // 8 seconds to stay under Vercel's 10s limit
+      max_tokens: 1000
     });
     const rawBlendContent = blendResponse.choices[0].message.content;
     console.log('Raw blend response:', rawBlendContent);
@@ -156,20 +156,20 @@ export async function POST({ request }) {
       service_type: blendedModel.service_type || 'Unknown',
       entities: Object.fromEntries(
         Object.entries(blendedModel.entities || {}).map(([key, value]) => {
-          const newKey = key.replace(/-/g, '_'); // e.g., sid_customer-support-service -> sid_customer_support_service
+          const newKey = key.replace(/-/g, '_');
           return [
             newKey,
             {
               ...value,
               attributes: Object.fromEntries(
                 Object.entries(value.attributes || {}).map(([attrKey, attrValue]) => [
-                  attrKey.replace(/-/g, '_'), // Normalize attribute names
+                  attrKey.replace(/-/g, '_'),
                   attrValue
                 ])
               ),
               relationships: Object.fromEntries(
                 Object.entries(value.relationships || {}).map(([relKey, relValue]) => {
-                  const newRelKey = relKey.replace(/-/g, '_'); // e.g., sid_provides-one-to-many -> sid_provides_one_to_many
+                  const newRelKey = relKey.replace(/-/g, '_');
                   const newRelValue = typeof relValue === 'string' ? relValue.replace(/-/g, '_') : relValue;
                   return [newRelKey, newRelValue];
                 })
@@ -193,8 +193,7 @@ export async function POST({ request }) {
     const specResponse = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [{ role: 'user', content: specPrompt }],
-      max_tokens: 1000,
-      timeout: 8000 // 8 seconds to stay under Vercel's 10s limit
+      max_tokens: 1000
     });
     const spec = specResponse.choices[0].message.content;
     console.log('Generated spec:', spec);
@@ -208,9 +207,9 @@ export async function POST({ request }) {
       prompt,
       spec,
       framework: 'Blended (TMForumSID+ARTS)',
-      provider: normalizedModel.provider || 'OSP_Inc', // Normalized
-      suppliers: normalizedModel.suppliers || ['generic_supplier'], // Normalized
-      consumers: normalizedModel.consumers || ['generic_consumer'], // Normalized
+      provider: normalizedModel.provider || 'OSP_Inc',
+      suppliers: normalizedModel.suppliers || ['generic_supplier'],
+      consumers: normalizedModel.consumers || ['generic_consumer'],
       version,
       blended_model: normalizedModel,
       metadata: normalizedModel.metadata || {}
