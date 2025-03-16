@@ -4,10 +4,9 @@ import 'dotenv/config';
 import { supabase } from '$lib/supabase';
 import { supabaseAdmin } from '$lib/supabaseAdmin';
 
-// Set timeout globally in the OpenAI client (8 seconds = 8000ms)
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-  timeout: 8000 // Applies to all requests, keeps us under Vercel's 10s limit
+  timeout: 8000
 });
 
 async function createTableFromModel(blendedModel, prompt) {
@@ -29,7 +28,6 @@ async function createTableFromModel(blendedModel, prompt) {
 
   const refinedTables = {};
 
-  // First pass: Define main entities with normalized names
   for (const [entityName, entity] of Object.entries(entities)) {
     const normalizedEntityName = entityName.replace(/-/g, '_');
     const columns = [];
@@ -58,34 +56,33 @@ async function createTableFromModel(blendedModel, prompt) {
     refinedTables[normalizedEntityName] = columns;
   }
 
-  // Second pass: Add relationships and referenced tables with normalized names
   for (const [entityName, entity] of Object.entries(entities)) {
     const normalizedEntityName = entityName.replace(/-/g, '_');
     const columns = refinedTables[normalizedEntityName];
     const seenColumns = new Set(columns.map(c => c.name));
-  
+
     if (entity.relationships) {
       for (const [relName, relTarget] of Object.entries(entity.relationships)) {
         const cleanRelName = relName.replace(/^(sid_|arts_)/, '').replace(/-/g, '_');
-        let targetName = relTarget;
-  
-        if (typeof relTarget === 'string' && relTarget.includes('(')) {
-          targetName = relTarget.match(/\(([^)]+)\)/)?.[1] || relTarget;
-        }
-  
-        // Ensure targetName is a string before calling replace
-        if (typeof targetName !== 'string') {
-          console.warn(`Invalid targetName for ${cleanRelName}: ${JSON.stringify(targetName)}. Defaulting to generic name.`);
-          targetName = 'generic_target';
+        let targetName;
+
+        if (typeof relTarget === 'string') {
+          targetName = relTarget;
+          if (targetName.includes('(')) {
+            targetName = targetName.match(/\(([^)]+)\)/)?.[1] || targetName;
+          }
         } else {
-          targetName = targetName.replace(/-/g, '_');
+          console.warn(`Invalid relTarget for ${cleanRelName}: ${JSON.stringify(relTarget)}. Defaulting to generic_target.`);
+          targetName = 'generic_target';
         }
-  
+
+        targetName = String(targetName).replace(/-/g, '_');
+
         if (targetName && !seenColumns.has(cleanRelName)) {
           columns.push({ name: cleanRelName, type: 'text', constraints: `REFERENCES ${targetName}(id)` });
           seenColumns.add(cleanRelName);
         }
-  
+
         if (targetName && !refinedTables[targetName]) {
           refinedTables[targetName] = [
             { name: 'id', type: 'text', constraints: 'PRIMARY KEY' },
@@ -96,7 +93,6 @@ async function createTableFromModel(blendedModel, prompt) {
     }
   }
 
-  // Create tables in Supabase
   for (const [entityName, columns] of Object.entries(refinedTables)) {
     let version = 0;
     let created = false;
@@ -149,14 +145,22 @@ export async function POST({ request }) {
     try {
       blendedModel = JSON.parse(rawBlendContent);
     } catch (parseError) {
-      console.error('JSON parse error:', parseError.message);
+      console.error('JSON parse error:', parseError.message, 'Raw content:', rawBlendContent);
       console.error('Attempting to fix JSON...');
-      const fixedContent = rawBlendContent.replace(/(\w+)\s+(\w+)/g, '"$1": "$2"').replace(/'/g, '"');
-      blendedModel = JSON.parse(fixedContent || '{}');
+      const jsonMatch = rawBlendContent.match(/```json\s*([\s\S]*?)\s*```/)?.[1] || rawBlendContent;
+      const fixedContent = jsonMatch
+        .replace(/(\w+)\s+(\w+)/g, '"$1": "$2"')
+        .replace(/'/g, '"')
+        .trim();
+      try {
+        blendedModel = JSON.parse(fixedContent);
+      } catch (secondError) {
+        console.error('Second parse attempt failed:', secondError.message);
+        blendedModel = { service_type: 'Unknown', entities: {} };
+      }
     }
     console.log('Blended model:', blendedModel);
 
-    // Normalize table names (replace hyphens with underscores)
     const normalizedModel = {
       ...blendedModel,
       service_type: blendedModel.service_type || 'Unknown',
