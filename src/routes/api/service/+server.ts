@@ -45,7 +45,11 @@ async function createTableFromModel(blendedModel, prompt) {
     seenColumns.add('id');
 
     for (const [attrName, attrType] of Object.entries(attributes)) {
-      const cleanName = attrName.replace(/^(sid_|arts_)/, '').replace(/-/g, '_');
+      let cleanName = attrName.replace(/^(sid_|arts_)/, '').replace(/-/g, '_');
+      if (/^\d+$/.test(cleanName) || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(cleanName)) {
+        cleanName = `attr_${cleanName.replace(/[^a-zA-Z0-9_]/g, '') || 'unknown'}`;
+        console.warn(`Invalid attribute name "${attrName}" for ${normalizedEntityName}, renamed to "${cleanName}"`);
+      }
       const sqlType = attrType === 'string' ? 'text' : attrType === 'date' ? 'date' : attrType === 'float' ? 'numeric' : attrType === 'int' ? 'integer' : attrType === 'list' ? 'text[]' : 'text';
       if (!seenColumns.has(cleanName)) {
         columns.push({ name: cleanName, type: sqlType });
@@ -96,8 +100,9 @@ async function createTableFromModel(blendedModel, prompt) {
   for (const [entityName, columns] of Object.entries(refinedTables)) {
     let version = 0;
     let created = false;
+    const maxAttempts = 5;
 
-    while (!created) {
+    while (!created && version < maxAttempts) {
       const checkName = version === 0 ? entityName : `${entityName}_v${version}`;
       const { data: exists } = await supabaseAdmin.rpc('table_exists', { table_name: checkName });
       console.log(`Does ${checkName} exist?`, exists);
@@ -121,6 +126,10 @@ async function createTableFromModel(blendedModel, prompt) {
       } else {
         version++;
       }
+    }
+
+    if (!created) {
+      console.error(`Failed to create table ${entityName} after ${maxAttempts} attempts`);
     }
   }
 
