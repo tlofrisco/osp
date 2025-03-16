@@ -63,23 +63,29 @@ async function createTableFromModel(blendedModel, prompt) {
     const normalizedEntityName = entityName.replace(/-/g, '_');
     const columns = refinedTables[normalizedEntityName];
     const seenColumns = new Set(columns.map(c => c.name));
-
+  
     if (entity.relationships) {
       for (const [relName, relTarget] of Object.entries(entity.relationships)) {
         const cleanRelName = relName.replace(/^(sid_|arts_)/, '').replace(/-/g, '_');
         let targetName = relTarget;
-
+  
         if (typeof relTarget === 'string' && relTarget.includes('(')) {
           targetName = relTarget.match(/\(([^)]+)\)/)?.[1] || relTarget;
         }
-
-        targetName = targetName.replace(/-/g, '_');
-
+  
+        // Ensure targetName is a string before calling replace
+        if (typeof targetName !== 'string') {
+          console.warn(`Invalid targetName for ${cleanRelName}: ${JSON.stringify(targetName)}. Defaulting to generic name.`);
+          targetName = 'generic_target';
+        } else {
+          targetName = targetName.replace(/-/g, '_');
+        }
+  
         if (targetName && !seenColumns.has(cleanRelName)) {
           columns.push({ name: cleanRelName, type: 'text', constraints: `REFERENCES ${targetName}(id)` });
           seenColumns.add(cleanRelName);
         }
-
+  
         if (targetName && !refinedTables[targetName]) {
           refinedTables[targetName] = [
             { name: 'id', type: 'text', constraints: 'PRIMARY KEY' },
