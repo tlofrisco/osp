@@ -1,6 +1,32 @@
+// src/lib/supabase.ts
 import { createClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 
-const supabaseUrl = 'https://gqhrgbhmunksvwndwwzr.supabase.co'; // From Supabase dashboard
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdxaHJnYmhtdW5rc3Z3bmR3d3pyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDExNDY3NzQsImV4cCI6MjA1NjcyMjc3NH0.jDpEU_oM-CjMtbm-inVmmkScgLu44J9FalmL3D1EN2E'; // From Supabase dashboard
+// Detect if we're in the browser
+const isBrowser = typeof window !== 'undefined' && typeof document !== 'undefined';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+console.log('Initializing Supabase client with URL:', PUBLIC_SUPABASE_URL);
+export const supabase = createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: false,
+    storage: isBrowser ? {
+      getItem: (key) => {
+        const value = document.cookie.match(new RegExp(`(^| )${key}=([^;]+)`))?.[2] || null;
+        console.log('Supabase storage getItem (browser):', key, value);
+        return value;
+      },
+      setItem: (key, value) => {
+        console.log('Supabase storage setItem (browser):', key, value);
+        document.cookie = `${key}=${value};path=/;max-age=31536000;sameSite=lax`;
+      },
+      removeItem: (key) => {
+        console.log('Supabase storage removeItem (browser):', key);
+        document.cookie = `${key}=;path=/;max-age=0;sameSite=lax`;
+      }
+    } : undefined // Use default (localStorage) server-side for now
+  }
+});
+console.log('Supabase client initialized');
