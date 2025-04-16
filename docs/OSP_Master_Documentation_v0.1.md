@@ -1,17 +1,18 @@
 # OSP Master Documentation
 
-*Version: 0.2 | Last Updated: 2025-03-30*
+*Version: 0.3 | Last Updated: 2025-04-16*
 
 ---
 
 ## 🔁 Update & Maintenance Policy
 
-- **Update Format:** Add updates below relevant sections. Use versioning when structure changes (e.g., increment from 0.1 to 0.2 for significant updates).
-- **CRUD Interface:** Future editing will be available via a Supabase-connected admin panel or CLI tool (planned for Q2 2025).
-- **Sharing:** This file supports selective copying. Redact private sections (e.g., tokens, API keys, user data) before sharing with others or AI systems like ChatGPT, Gemini, or Grok.
+- **Update Format:** Add updates below relevant sections. Use versioning when structure changes (e.g., increment from 0.2 to 0.3 for significant updates).
+- **CRUD Interface:** Editing will be possible via Supabase-connected admin panel or CLI (planned Q2 2025).
+- **Sharing:** This file supports selective copying. Redact private sections before sharing.
 - **Version History:**
-  - **0.1 (2025-03-29):** Initial draft with basic vision, architecture, and roadmap.
-  - **0.2 (2025-03-30):** Expanded with detailed status, challenges, progress logs, and schema details based on recent development work.
+  - **0.1 (2025-03-29):** Initial draft.
+  - **0.2 (2025-03-30):** Service model, schema, UI, and backend logic.
+  - **0.3 (2025-04-16):** Agent Loop MVP with full runtime, registry, handler, and logging.
 
 ---
 
@@ -139,24 +140,39 @@ OSP sits in a very unique place, somewhere among these competitors:
 ### 📁 Folder Structure
 osp/
 ├── src/
-│   ├── app.d.ts, app.html, hooks.server.ts (authentication and session handling)
+│   ├── app.d.ts
+│   ├── app.html
+│   ├── hooks.server.ts
+│   ├── agents/
+│   │   └── debug_suggestion_agent.ts
 │   ├── lib/
-│   │   ├── supabase.ts (Supabase client for frontend)
-│   │   ├── supabaseAdmin.ts (Supabase admin client for server-side operations)
+│   │   ├── supabase.ts
+│   │   ├── supabaseAdmin.ts
+│   │   └── agents/
+│   │       └── debug_suggestion_agent.ts
 │   ├── routes/
-│   │   ├── +page.svelte (main UI for service generation and CRUD)
+│   │   ├── +page.svelte
 │   │   └── api/
-│   │       ├── debug/ (debug endpoints, e.g., /api/debug/tables)
-│   │       ├── osp/service/ (service generation endpoints)
-│   │       ├── services/smb_inventory/ (dynamic service endpoints)
-│   │       │   ├── model/ (fetches service model)
-│   │       │   └── [entity]/ (CRUD operations for entities like part, store)
-│   │       └── tables/ (fetches available tables)
-│   └── types/
-│       └── supabase.ts (TypeScript types for Supabase)
-├── package.json (dependencies and scripts)
-└── vite.config.ts (Vite configuration)
-
+│   │       ├── agent/
+│   │       │   ├── start/+server.ts
+│   │       │   └── loop/+server.ts
+│   │       ├── agent-event/+server.ts
+│   │       ├── agent-run/+server.ts
+│   │       ├── debug/+server.ts
+│   │       ├── decision/+server.ts
+│   │       ├── osp/service/+server.ts
+│   │       ├── services/smb_inventory/
+│   │       │   ├── +server.ts
+│   │       │   ├── model/+server.ts
+│   │       │   └── [entity]/+server.ts
+│   │       ├── tables/+server.ts
+│   │       └── test-insert/+server.ts
+│   └── test/
+│       └── agent-loop/
+│           ├── +page.svelte
+│           └── +server.ts
+└── types/
+    └── supabase.ts
 
 ### 🚀 Setup Instructions
 1. Clone the repository from GitHub (if public; currently private to `tlofrisco@gmail.com`).
@@ -336,11 +352,72 @@ osp/
   - Centralize logs in Supabase for debugging and analytics (Q2 2025).
   - Add user-facing logs for transparency (e.g., "Service generated successfully").
 
+## 🧠 10. Agent Loop MVP
+
+### Overview
+
+The **Agent Loop MVP** introduces a fully operational framework for autonomous agents in OSP. Each agent is treated as a service component with metadata, runtime orchestration, logging, and task routing.
+
+### 🔄 Flow Summary
+
+1. **Trigger**: POST to `/api/agent/start` creates a new `agent_run_log` entry via RPC and internally triggers `/api/agent/loop`.
+2. **Loop**: `loop/+server.ts` reads a simulated task type (e.g., `'debugging'`), finds matching agents from `agent_registry`, and calls the assigned handler.
+3. **Handler**: The agent handler (e.g., `debug_suggestion_agent.ts`) logs suggestions and completes task simulation.
+4. **Result**: Returned to UI (`test/agent-loop/+page.svelte`) for user feedback.
+
+### 🧬 Agent Metadata
+
+Agents are stored in:
+
+```sql
+create type ai_osp_runtime.task_type as enum ('debugging', 'error_analysis', 'autofix');
+
+create table ai_osp_runtime.agent_registry (
+  agent_id uuid primary key default gen_random_uuid(),
+  name text,
+  description text,
+  can_handle ai_osp_runtime.task_type[],
+  handler_function text,
+  created_at timestamptz default now()
+);
+```
+
+Sample entry:
+
+```sql
+insert into ai_osp_runtime.agent_registry (
+  name, description, can_handle, handler_function
+)
+values (
+  'Debug Suggestion Agent',
+  'Suggests fixes for debugging based on logs and context.',
+  array['debugging', 'error_analysis']::ai_osp_runtime.task_type[],
+  'debug_suggestion_agent'
+);
+```
+
+### 🗂️ New Supabase Schemas & Tables
+
+**Schema:** `ai_osp_runtime`
+
+| Table                | Purpose                                           |
+|---------------------|---------------------------------------------------|
+| `agent_registry`     | Stores agent definitions and handlers             |
+| `agent_event_log`    | Will store agent-generated logs and insights      |
+| `agent_run_log`      | Tracks agent invocations and status               |
+| `agent_task_queue`   | (Planned) Queue for multi-agent collaboration     |
+
+**Schema:** `osp_metadata`
+
+| Table           | Purpose                         |
+|----------------|----------------------------------|
+| `hardcore_rules` | System rules and non-negotiables |
+
 ---
 
-## 🛠️ 10. Current Status & Challenges
+## 🛠️ 11. Current Status & Challenges
 
-### 📍 10.1 Status Overview
+### 📍 11.1 Status Overview
 - **Last Updated:** 2025-03-30
 - **User:** `tlofrisco@gmail.com` (OSP Master)
 - **Current Service:** SMB Inventory Service (version 30)
@@ -353,9 +430,9 @@ osp/
   - **Data Fetching:** "Parts" and "Stores" tables are not displaying because `fetchParts` and `fetchStores` are failing.
   - **Schema Permissions:** `authenticated` role does not have `USAGE` permission on `smb_inventory` schema despite `GRANT USAGE`.
 
-### 🚧 10.2 Challenges & Resolutions
+### 🚧 11.2 Challenges & Resolutions
 
-#### 🖥️ 10.2.1 Form Input Issue
+#### 🖥️ 11.2.1 Form Input Issue
 - **Description:** Users cannot type into the form fields in `+page.svelte`. The form renders, and `formData` is logged, but `on:input` events are not firing.
 - **Impact:** Prevents adding or editing inventory items, blocking a core MVP feature.
 - **Attempts to Resolve:**
@@ -372,52 +449,12 @@ osp/
   - Disable browser extensions that might interfere.
   - Check for JavaScript errors in the browser console.
 
-#### 📡 10.2.2 Data Fetching Issue
-- **Description:** The "Parts" and "Stores" sections are not displaying because `fetchParts` and `fetchStores` are failing. No fetch logs appear in the browser console.
-- **Impact:** Prevents users from viewing existing parts and stores, blocking a core MVP feature.
-- **Attempts to Resolve:**
-  - Added detailed logging to `fetchParts` and `fetchStores` (e.g., response status, headers, result).
-  - Removed `fetchSuppliers` since the `supplier` table doesn’t exist in this service version.
-  - Adjusted `onMount` to ensure fetch functions are called after service generation.
-- **Current Hypothesis:**
-  - Schema `USAGE` permissions issue: `authenticated` role cannot access `smb_inventory` schema.
-  - Fetch requests might not be called due to `serviceGenerated` flag timing in `onMount`.
-- **Next Steps:**
-  - Fix schema permissions by re-running `GRANT USAGE` and verifying with SQL queries.
-  - Test fetch endpoints manually with `curl` to debug server-side issues.
-  - Ensure `serviceGenerated` flag is set correctly to trigger fetch requests.
-
-#### 🔐 10.2.3 Schema Permissions Issue
-- **Description:** `authenticated` role does not have `USAGE` permission on `smb_inventory` schema, despite `GRANT USAGE` command succeeding. `Schema USAGE permissions` log shows `[]`.
-- **Impact:** Prevents `authenticated` users from accessing tables, causing fetch failures.
-- **Attempts to Resolve:**
-  - Ran `GRANT USAGE ON SCHEMA smb_inventory TO authenticated;` in Supabase SQL Editor.
-  - Queried `information_schema.usage_privileges` to verify permissions (returned empty).
-  - Granted `USAGE` to `public` role as a fallback.
-- **Current Hypothesis:**
-  - Possible Supabase bug or misconfiguration in role inheritance.
-  - Permissions might not be applied correctly due to session or role context.
-- **Next Steps:**
-  - Run additional SQL queries to verify role membership and permissions.
-  - Grant explicit `SELECT` permissions on tables as a workaround.
-  - Restart the server and regenerate the service to check logs.
-
-### 📜 10.3 Progress Log
-- **2025-03-29:**
-  - Set up initial SMB Inventory Service with tables `bikepart`, `supplier`, `store`.
-  - Identified form input issue and started debugging.
-- **2025-03-30:**
-  - Updated service to version 30 with new model (`inventory`, `part`, `store`).
-  - Removed `supplier` table from UI and fetch logic since it’s not in the current model.
-  - Added detailed logging for form events and fetch requests.
-  - Identified schema permissions issue and attempted to resolve with `GRANT USAGE`.
-
 ---
 
-## 📄 11. Export + Copy Usage
+## 📄 12. Export + Copy Usage
 
 ### 📋 When Sharing with AI
-- **Include:** Everything except tokens, API keys, or private config values (e.g., `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`).
+- **Include:** Everything except tokens, API keys, or private config values (eg., `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`).
 - **Anchor:** Use `# OSP Master Documentation` as the anchor for AI to understand the context.
 - **Indexing:** AI systems can scan section titles (e.g., `## ⚙️ 5. Service Model & Generator`) to index capabilities.
 - **Redaction Example:**
