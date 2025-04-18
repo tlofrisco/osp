@@ -1,0 +1,95 @@
+OSP Hard Core Framework
+1. Purpose of the Hard Core
+The Hard Core protects foundational architecture, security, and vision-critical principles of the One Service Platform. All agents must validate ideas, changes, and code against this framework. Violation of Hard Core rules requires escalation and cannot be auto-committed.
+
+2. Foundational Principles
+Services must be modular, self-contained, and schema-isolated.
+
+Metadata about services, components, and interactions must remain centralized and consistent.
+
+The platform must support long-term maintainability, security, and extensibility.
+
+AI agents must validate against this document before performing any irreversible operation.
+
+Any attempt to bypass or weaken this framework is prohibited.
+
+3. Security Rules
+No API keys, service tokens, or credentials may be hardcoded, logged, or committed.
+
+Environment variables must follow secure access patterns (.env, secrets manager).
+
+Agents must not expose, request, or write back secrets unless through secure handlers.
+
+Any access to external APIs must be audited and scoped via proxy or validation layers.
+
+4. Architectural Rules
+Supabase schemas must be service-specific (e.g., smb_inventory), not shared.
+
+The public schema must not contain new tables unless explicitly allowed.
+
+Core platform metadata must remain in a protected schema (e.g., osp_metadata).
+
+Platform agents must not alter system libraries like lib/supabase.ts unless passed through a validator.
+
+5. Schema & Data Integrity
+Primary keys and foreign key relationships must be defined in the initial service model and not auto-altered.
+
+Column types (e.g., UUID, timestamp) must be respected and validated before changes.
+
+Agents cannot delete or rename core columns without multi-layer review.
+
+RLS (Row-Level Security) policies must be applied and reviewed for any new table.
+
+6. UX and API Contract Rules
+Once published, a service’s API structure (path, input/output schema) is contractually locked.
+
+Changes must go through a versioning process — no breaking changes to endpoints allowed post-publication.
+
+UI fields tied to data models must remain in sync with schema changes.
+
+7. Agent Workflow Protections
+All proposed changes by agents must first be validated against this Hard Core.
+
+The Validator Agent must return a “PASS” before changes are accepted by the Code Agent.
+
+If a rule is at risk, agents must raise a HardCoreViolation and pause execution.
+
+Debug agents must preserve the integrity of logs and restore the last valid state if a fix breaks functionality.
+
+8. Roles and Governance
+8.1. Platform Owner (You)
+Owns and maintains the Hard Core Framework
+
+Approves changes to system-wide rules, metadata schemas, and agent logic
+
+Has authority to override validations in exceptional cases (but must log rationale)
+
+8.2. Service Provider
+Can create and publish services (e.g., an Inventory Manager or CRM module)
+
+May define service-specific rules, schemas, and UI behaviors
+
+Must not violate or override OSP Hard Core rules
+
+All schema names must remain isolated and follow naming conventions
+
+May use agents to manage or evolve their service, but within defined boundaries
+
+8.3. Service Consumer
+Can use, integrate, and subscribe to published services
+
+Cannot alter underlying data models, RLS, or business logic of provider services
+
+May use agents to request usage insights, compose new services, or automate workflows built on top of others
+
+8.4. Agent Responsibility
+Each agent is role-bound:
+
+A consumer-facing agent cannot write to service code.
+
+A provider-facing agent cannot touch platform metadata.
+
+All agents must identify which role they're acting on behalf of and obey associated permissions.
+
+The Cycle Manager Agent must enforce these role-based boundaries at every stage of the dev/test/debug loop.
+

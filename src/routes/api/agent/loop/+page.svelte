@@ -1,28 +1,23 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
+  import { invalidate } from '$app/navigation';
   import Markdown from 'markdown-it';
 
   const md = new Markdown();
 
-  // Start loop state
-  let message = '';
-  let runId = '';
-  let isLoading = false;
-
-  // Pending decision state
   let pendingEvent: any = null;
   let parsedDescription: any = null;
   let notes = '';
   let decision = '';
   let hardcoreRule = '';
-  let starting = false;
 
   onMount(async () => {
     const res = await fetch('/api/agent-event');
     const data = await res.json();
     pendingEvent = data.event;
 
-    // Safe JSON parsing
+    // Safe JSON parsing for event_description
     try {
       if (pendingEvent?.event_description) {
         parsedDescription = JSON.parse(pendingEvent.event_description);
@@ -45,36 +40,6 @@
     }
   });
 
-  async function startAgentLoop() {
-    isLoading = true;
-    message = '⏳ Starting agent run...';
-    runId = '';
-
-    try {
-      const startRes = await fetch('/api/agent/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trigger: 'manual_test_start' })
-      });
-
-      const startData = await startRes.json();
-
-      if (startRes.ok && startData.success && startData.run_id) {
-        runId = startData.run_id;
-        message = `✅ Agent run initiated successfully.\nRun ID: ${runId}\nLoop Trigger Status: ${startData.loop_status || 'unknown'}\nDetails: ${startData.loop_details || 'N/A'}`;
-        console.log('Agent Start Response:', startData);
-      } else {
-        console.error('Failed API Response:', { status: startRes.status, body: startData });
-        message = `❌ Failed to start agent run.\nError: ${startData?.error || `Server responded with status ${startRes.status}`}\nDetails: ${startData?.details || 'No additional details provided.'}`;
-      }
-    } catch (error) {
-      console.error('Network or fetch error:', error);
-      message = `❌ Network error or failed to fetch.\nDetails: ${error.message}`;
-    } finally {
-      isLoading = false;
-    }
-  }
-
   async function submitDecision(d: string) {
     decision = d;
 
@@ -93,31 +58,21 @@
     if (result.success) {
       alert('✅ Decision submitted.');
       pendingEvent = null;
-      location.reload(); // full reload to pick up changes
+      invalidate('/test/agent-loop');
     } else {
       alert('❌ Error submitting decision.');
     }
   }
 </script>
 
-<h1>🔁 Trigger AI-OSP Agent Loop</h1>
-
-<button on:click={startAgentLoop} disabled={isLoading}>
-  {#if isLoading}
-    ⏳ Processing...
-  {:else}
-    ▶️ Start Agent Loop
-  {/if}
-</button>
-
-<pre style="white-space: pre-wrap; margin-top: 1em; border: 1px solid #ccc; padding: 0.5em;">{message}</pre>
-
 {#if pendingEvent}
-  <hr />
-  <section style="margin-top: 2rem;">
+  <section>
     <h2>🧠 Pending Agent Decision</h2>
+
     <p><strong>Run ID:</strong> {pendingEvent.run_id}</p>
     <p><strong>Detected At:</strong> {new Date(pendingEvent.detected_at).toLocaleString()}</p>
+
+    <hr />
 
     {#if parsedDescription}
       <h3>📝 Agent Summary</h3>
@@ -133,10 +88,12 @@
     {/if}
 
     {#if hardcoreRule}
-      <h3>🚨 Hard Core Rule</h3>
+      <hr />
+      <h3>🚨 Hard Core Rule Triggered</h3>
       <div class="markdown" innerHTML={md.render(hardcoreRule)}></div>
     {/if}
 
+    <hr />
     <h4>🧾 Reviewer Notes:</h4>
     <textarea bind:value={notes} rows="4" placeholder="Optional notes or reasoning..."></textarea>
 
@@ -147,37 +104,22 @@
     </div>
   </section>
 {:else}
-  <p style="margin-top: 2rem;">🎉 No pending agent events.</p>
+  <p>🎉 No pending agent events.</p>
 {/if}
 
 <style>
-  button:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
-  }
-
-  textarea {
-    width: 100%;
-    margin-top: 0.5rem;
-  }
-
-  .markdown :global(h1),
-  .markdown :global(h2),
-  .markdown :global(h3) {
+  .markdown :global(h1), .markdown :global(h2), .markdown :global(h3) {
     margin-top: 1rem;
     font-weight: bold;
   }
-
   .markdown :global(p) {
     margin: 0.5rem 0;
   }
-
   .markdown {
     background: #f5f5f5;
     padding: 1rem;
     border-left: 4px solid #ccc;
     border-radius: 6px;
     font-family: monospace;
-    margin-bottom: 1rem;
   }
 </style>

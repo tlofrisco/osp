@@ -2,31 +2,28 @@
 import { json } from '@sveltejs/kit';
 import { supabaseAdmin } from '$lib/supabaseAdmin';
 
-export async function POST({ fetch }) {
+export async function POST({ request, fetch }) {
   console.log('🚀 Triggered /api/agent/start');
 
-  // Step 1: Insert via RPC
-  const { data: runInsert, error: insertError } = await supabaseAdmin.rpc('insert_agent_run');
+  const body = await request.json().catch(() => ({}));
+  const trigger = body?.trigger || 'manual';
 
-  console.log('🧾 RPC Result:', runInsert);
-  if (insertError) {
+  // ✅ Step 1: Call the *public* insert_agent_run wrapper, which returns a scalar UUID
+  const { data: run_id, error: insertError } = await supabaseAdmin.rpc('insert_agent_run', {
+    trigger_reason: trigger
+  });
+
+  console.log('🧾 RPC Result:', run_id);
+
+  if (insertError || !run_id) {
     console.error('❌ Insert Error:', insertError);
     return json({
       error: 'DB Error: Failed to create run record.',
-      details: insertError.message || 'Unknown insert error'
+      details: insertError?.message || 'Unknown insert error'
     }, { status: 500 });
   }
 
-  const run_id = runInsert?.[0]?.run_id;
-  if (!run_id) {
-    console.error('❌ No run_id returned from RPC.');
-    return json({
-      error: 'Server Error: Failed to retrieve run_id after creation.',
-      details: 'RPC function did not return run_id'
-    }, { status: 500 });
-  }
-
-  // Step 2: Trigger the loop
+  // 🔁 Step 2: Trigger the agent loop with the new run_id
   let loopStatus = 'pending';
   let loopDetails = 'Not called';
   let loopResult = null;
