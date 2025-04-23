@@ -1,3 +1,5 @@
+console.log('🟢 POST /api/osp/service reached!');
+
 import { json, error } from '@sveltejs/kit'; // Added 'error' import
 import { supabaseAdmin } from '$lib/supabaseAdmin';
 // Removed unused createClient import from '@supabase/supabase-js'
@@ -357,9 +359,20 @@ async function createTableFromModel(blendedModel: any, serviceDraft: any, servic
 // --- End of createTableFromModel ---
 
 
-export async function POST({ request, locals }) {
+export async function POST({ request, locals, params }) {
+  console.log('🟢 POST /api/osp/service reached!');
   const supabase = locals.supabase;
   let sessionResult = locals.session;
+
+  // Optional: raw payload logging
+  let serviceDraft;
+  try {
+    serviceDraft = await request.json();
+    console.log('✅ Parsed service draft:', serviceDraft);
+  } catch (err) {
+    console.error('❌ Failed to parse JSON payload:', err.message);
+    throw error(400, 'Invalid JSON payload');
+  }
 
   console.log('POST /api/osp/service: Received request.');
 
@@ -376,11 +389,12 @@ export async function POST({ request, locals }) {
 
   console.log(`POST /api/osp/service: Authenticated as ${session.user.email}`);
 
-  const serviceDraft = await request.json();
-  console.log('Received service draft:', serviceDraft);
+  //const serviceDraft = await request.json(); // Now used for real after test parse
+  console.log('✅ Received service draft:', serviceDraft);
 
   let blendedModel = { service_type: 'Unknown', entities: [] };
   let spec = '';
+
 
   try {
     console.log('Starting OpenAI blend request');
@@ -454,7 +468,7 @@ export async function POST({ request, locals }) {
   }
 
   const prompt = `${serviceDraft.problem} - ${serviceDraft.requirements}`;
-  const serviceSchema = 'smb_inventory';
+  const serviceSchema = serviceDraft.service_schema || serviceDraft.schema_name || 'smb_inventory';  //this is likley culprit !!
 
   console.log('Checking existing service version with prompt:', prompt);
   const { data: existingService, error: fetchServiceError } = await supabase
@@ -508,6 +522,19 @@ export async function POST({ request, locals }) {
     spec,
     blendedModel,
     version: newVersion,
-    message: `Service version ${newVersion} generated successfully.`
+    message: `Service version ${newVersion} generated successfully.`,
+    service_schema: serviceSchema, // Fixed
+    service: {
+      user_id: session.user.id,
+      prompt,
+      spec,
+      version: newVersion,
+      service_schema:serviceSchema, // Fixed
+      blended_model: blendedModel,
+      created_at: new Date().toISOString(),
+      frameworks: serviceDraft.frameworks
+    }
   });
+  
+  
 }

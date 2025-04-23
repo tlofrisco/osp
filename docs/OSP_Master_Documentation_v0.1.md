@@ -460,3 +460,80 @@ values (
 - **Redaction Example:**
   - Before: `Auth header: Bearer eyJhbGciOi...`
   - After: `Auth header: Bearer [REDACTED]`
+
+  ## 🧠 13. Agent Loop (Runtime + Human-in-the-Loop)
+
+*Version: 1.0 | Added: 2025-04-16*
+
+The Agent Loop introduces a **live debugging and enhancement feedback loop** into OSP that functions as a productive development teammate. It enables autonomous agents to analyze code issues, suggest fixes, and log findings for human decision-making and next-loop triggers.
+
+### 🚦 Flow Overview
+
+| Step | Component                         | Description |
+|------|----------------------------------|-------------|
+| 1️⃣   | `/api/agent/start`               | Kicks off a new agent run. Inserts a row into `agent_run_log` (via RPC) and calls `/api/agent/loop`. |
+| 2️⃣   | `/api/agent/loop`                | Selects a registered agent (e.g., `debug_suggestion_agent`) and runs it. |
+| 3️⃣   | `/agents/debug_suggestion_agent.ts` | Calls `collectErrorContext()` and generates suggestions using OpenAI. |
+| 4️⃣   | `/lib/agents/error_collector.ts` | Pulls logs from recent SQL events, API logs, and console errors. |
+| 5️⃣   | Logs saved to `agent_event_log`  | Output is inserted using `insert_agent_event_log()` RPC. |
+| 6️⃣   | `/test/agent-loop/+page.svelte`  | Renders the result in UI for human review and decision. |
+| 7️⃣   | `/api/decision`                  | Updates the `agent_event_log` and `agent_run_log`, and may resume the loop. |
+
+### 🧪 Agent Design
+
+- **Name:** Debug Suggestion Agent
+- **Handler:** `debug_suggestion_agent.ts`
+- **Can Handle:** `['debugging', 'error_analysis']`
+- **Registry Location:** Supabase table `ai_osp_runtime.agent_registry`
+
+```ts
+// Sample registry insert
+insert into ai_osp_runtime.agent_registry (
+  name, description, can_handle, handler_function
+) values (
+  'Debug Suggestion Agent',
+  'Suggests fixes based on recent logs and API error trails.',
+  array['debugging', 'error_analysis'],
+  'debug_suggestion_agent'
+);
+📊 Logging Tables (Supabase)
+Schema: ai_osp_runtime
+
+
+Table	Description
+agent_run_log	Tracks each loop execution (start, status, trigger).
+agent_event_log	Stores the agent’s output suggestions and human review status.
+agent_registry	Registry of all agent definitions and handlers.
+agent_task_queue	Queue (future use) for chaining agent collaboration.
+Schema: osp_metadata
+
+
+Table	Description
+hardcore_rules	Core rules validated against agent outputs.
+👩‍💻 How to Use the Loop as a Dev Tool
+Trigger Manually:
+
+Use the UI at /test/agent-loop and click ▶️ Start Agent Loop.
+
+View Suggestions:
+
+If an agent fires, its suggestions will appear on the screen for human review.
+
+Make a Decision:
+
+Choose ✅ Yes, ❌ No, or ⚠️ Conditional. This logs your decision and marks the agent run as complete.
+
+Auto-Resume (Optional):
+
+A "Yes" decision restarts the loop with a new task if defined.
+
+🤖 How It Adds Value
+Allows humans to co-pilot AI agents safely.
+
+Establishes a reproducible debugging/logging loop.
+
+Ensures that agents don’t make final decisions unless explicitly authorized.
+
+Prepares the foundation for multi-agent orchestration and post-MVP automation.
+
+

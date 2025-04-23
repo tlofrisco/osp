@@ -23,15 +23,15 @@ export const GET: RequestHandler = async ({ locals }) => {
     .rpc('get_smb_inventory_model'); // Call the function
 
   if (rpcError) {
-    console.error("Error calling get_smb_inventory_model RPC:", rpcError);
+    console.error("Error calling get_[serviceName]_model RPC:", rpcError);
     throw error(500, `Failed to fetch service model via RPC: ${rpcError.message}`);
   }
 
   // The function returns the JSON directly
   if (!modelData) {
-      console.error("RPC get_smb_inventory_model returned null or undefined.");
+      console.error("RPC get_[serviceName]_model returned null or undefined.");
        // Maybe the function found no matching service? Return 404.
-      throw error(404, 'Service model not found for smb_inventory.');
+      throw error(404, 'Service model not found for [serviceName].');
   }
 
   console.log("Successfully fetched blended_model via RPC.");

@@ -15,6 +15,7 @@
   onMount(async () => {
     const res = await fetch('/api/agent-event');
     const data = await res.json();
+    console.log('Response:', data); // ✅ Add this for debug
     pendingEvent = data.event;
 
     // Safe JSON parsing for event_description
