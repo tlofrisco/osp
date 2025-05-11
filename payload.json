@@ -1,0 +1,10 @@
+{
+  "db_schema": [
+    "public",
+    "graphql_public",
+    "smb_inventory",
+    "osp_metadata",
+    "ai_osp_runtime",
+    "a_house_cleaning_service_1"
+  ]
+}

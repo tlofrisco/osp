@@ -1,23 +1,23 @@
-// 📁 File: src/routes/api/services/[service_schema]/[entity]/+server.ts
-import { json } from '@sveltejs/kit';
-import { supabaseAdmin } from '$lib/supabaseAdmin';
-import type { RequestHandler } from './$types';
+// Optional route: proxy insert from front-end via /service/[serviceName]/[entity]
+import { redirect } from '@sveltejs/kit';
 
-export const POST: RequestHandler = async ({ request, params }) => {
-  const { service_schema, entity } = params;
-  const formData = await request.json();
+export const POST = async ({ request, params, fetch }) => {
+  const { serviceName, entity } = params;
+  const formData = await request.formData();
 
-  console.log(`POST received for schema '${service_schema}', table '${entity}'`);
-  console.log('Form Data:', formData);
+  const payload = Object.fromEntries(formData.entries());
 
-  const { data, error } = await supabaseAdmin
-    .from(`${service_schema}.${entity}`)
-    .insert([formData]);
+  const res = await fetch(`/api/services/${serviceName}/${entity}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
 
-  if (error) {
-    console.error('❌ Supabase insert error:', error);
-    return json({ message: error.message }, { status: 500 });
+  if (!res.ok) {
+    const errorData = await res.json();
+    console.error('❌ Console route insert error:', errorData);
+    throw redirect(303, `/service/${serviceName}/${entity}?error=1`);
   }
 
-  return json({ message: 'Insert successful', data }, { status: 200 });
+  throw redirect(303, `/service/${serviceName}/${entity}?success=1`);
 };

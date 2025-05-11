@@ -1,19 +1,18 @@
-// src/lib/supabaseAdmin.ts
-import 'dotenv/config'; // ✅ This should always be first!
-
+// 📁 File: src/lib/supabaseAdmin.ts
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Database } from '../types/supabase'; // Path to your supabase.ts file
+import type { Database } from '../types/supabase';
+import { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } from '$env/static/private';
 
-// Ensure environment variables are defined
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be defined in the environment');
+// Validate environment variables
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be defined');
 }
 
-console.log('Initializing supabaseAdmin with key:', process.env.SUPABASE_SERVICE_ROLE_KEY);
+console.log('Initializing supabaseAdmin');
 export const supabaseAdmin: SupabaseClient<Database> = createClient<Database>(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 console.log('supabaseAdmin initialized');
