@@ -5,24 +5,25 @@ import type { RequestHandler } from './$types';
 
 // 🔧 Coerce values to correct SQL types
 function coerceDataToTableTypes(data: Record<string, any>, columns: { column_name: string, data_type: string }[]) {
-  const coerced: Record<string, any> = { ...data };
+  const validatedPayload: Record<string, any> = { ...data };
 
   for (const column of columns) {
     const name = column.column_name;
     const type = column.data_type;
 
     if (type === 'numeric' || type === 'integer') {
-      if (coerced[name] !== undefined && typeof coerced[name] === 'string') {
-        const num = parseFloat(coerced[name]);
+      if (validatedPayload[name] !== undefined && typeof validatedPayload[name] === 'string') {
+        const num = parseFloat(validatedPayload[name]);
         if (!isNaN(num)) {
-          coerced[name] = num;
+          validatedPayload[name] = num;
         }
       }
     }
     // Extend with more coercions as needed
+    console.log(`🔄 Coercing ${name}: ${data[name]} → ${validatedPayload[name]}`);
   }
 
-  return coerced;
+  return validatedPayload;
 }
 
 export const POST: RequestHandler = async ({ request, params }) => {
@@ -43,22 +44,31 @@ export const POST: RequestHandler = async ({ request, params }) => {
     return json({ message: 'Could not load table metadata', error: colErr }, { status: 500 });
   }
 
-  // 🔧 Step 2: Trust exact field names and coerce types
-  const coerced = coerceDataToTableTypes(rawData, columns);
+  console.log('📊 Available columns from Supabase:', columns.map(c => c.column_name));
 
-  if (!coerced.id) {
-    coerced.id = `${entity}_${Date.now()}`;
+  // 🔧 Step 2: Trust exact field names and coerce types
+  const validatedPayload = coerceDataToTableTypes(rawData, columns);
+
+  if (!validatedPayload.id) {
+    validatedPayload.id = `${entity}_${Date.now()}`;
+  }
+
+  const missingFields = columns
+    .map(c => c.column_name)
+    .filter(name => name !== 'id' && validatedPayload[name] == null);
+  if (missingFields.length) {
+    console.warn('⚠️ Missing expected fields:', missingFields);
   }
 
   // ✅ Confirm you're running updated handler
   console.log('🧪 Using corrected RPC param names');
-  console.log('🔍 Final data sent to RPC:', coerced);
+  console.log('🔍 Final data sent to RPC:', validatedPayload);
 
   // 🚀 Step 3: Insert using corrected param names
   const { error: rpcError } = await supabaseAdmin.rpc('insert_into_dynamic_table', {
     in_schema_name: serviceName,
     in_table_name: entity,
-    json_data: coerced
+    json_data: validatedPayload
   });
 
   if (rpcError) {
@@ -66,5 +76,5 @@ export const POST: RequestHandler = async ({ request, params }) => {
     return json({ message: 'Insert failed via RPC', details: rpcError }, { status: 500 });
   }
 
-  return json({ message: '✅ Inserted successfully via RPC', inserted: coerced }, { status: 200 });
+  return json({ message: '✅ Inserted successfully via RPC', inserted: validatedPayload }, { status: 200 });
 };

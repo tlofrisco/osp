@@ -13,7 +13,7 @@ export async function load({ params }) {
     console.log(`[+page.server.ts load] Querying 'services' table for service_schema = ${serviceName}, ordered by id DESC, limit 1`);
     const { data: serviceRecord, error: serviceError } = await supabaseAdmin
         .from('services')
-        .select('spec, blended_model, service_schema, id') // Added 'id' for logging confirmation
+        .select('spec, blended_model, service_schema, id, metadata') // Added metadata field
         .eq('service_schema', serviceName) // Filter by service name
         .order('id', { ascending: false }) // Order by ID descending (latest first)
         .limit(1) // Take only the top one
@@ -36,7 +36,31 @@ export async function load({ params }) {
     }
 
     // If we reached here, the latest service metadata was found successfully!
-    console.log(`[+page.server.ts load] Latest service metadata for '${serviceName}' (ID: ${serviceRecord.id}) found successfully.`); // Log the ID found
+    console.log(`[+page.server.ts load] Latest service metadata for '${serviceName}' (ID: ${serviceRecord.id}) found successfully.`);
+
+    // Fetch the associated manifest to get the contract UI
+    console.log(`[+page.server.ts load] Fetching manifest for service ID: ${serviceRecord.id}`);
+    const { data: manifestRecord, error: manifestError } = await supabaseAdmin
+        .schema('osp_metadata')
+        .from('service_manifests')
+        .select('manifest_data')
+        .eq('service_id', serviceRecord.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (manifestError) {
+        console.warn(`[+page.server.ts load] Error fetching manifest for service '${serviceName}':`, manifestError);
+    } else if (manifestRecord) {
+        console.log(`[+page.server.ts load] Manifest found for service '${serviceName}'`);
+        // Merge the contract UI from the manifest into the service record
+        if (manifestRecord.manifest_data?.contract_ui) {
+            serviceRecord.contract_ui = manifestRecord.manifest_data.contract_ui;
+            console.log(`[+page.server.ts load] Contract UI loaded from manifest`);
+        }
+    } else {
+        console.log(`[+page.server.ts load] No manifest found for service '${serviceName}' - will show fallback UI`);
+    }
 
     // Optional: Try to pull tables for that schema (enrichment)
     console.log(`[+page.server.ts load] Fetching table list for schema: ${serviceName}`);

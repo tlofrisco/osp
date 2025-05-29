@@ -4,6 +4,8 @@ import { json, error } from '@sveltejs/kit';
 import { supabaseAdmin } from '$lib/supabaseAdmin';
 import OpenAI from 'openai';
 import { OPENAI_API_KEY } from '$env/static/private';
+import { sanitizeBlendedModel, validateBlendedModel } from '$lib/osp/modelValidation';
+import { buildContractUIFromModel } from '$lib/osp/contractUIBuilder';
 //import fetch from 'node-fetch';
 
 // --- Utilities ---
@@ -35,84 +37,6 @@ async function generateUniqueSchemaName(baseName: string): Promise<string> {
   }
 
   return schemaName;
-}
-
-// ✨ Auto-fix attribute/relationship conflicts
-function sanitizeBlendedModel(blendedModel: any) {
-  const entities = blendedModel.entities ?? [];
-
-  for (const entity of entities) {
-    if (!entity.attributes || !entity.relationships) continue;
-
-    const attributeNames = new Set(Object.keys(entity.attributes));
-    const relationshipNames = new Set(Object.keys(entity.relationships));
-
-    for (const name of attributeNames) {
-      if (relationshipNames.has(name)) {
-        console.warn(`Conflict in '${entity.name}': Attribute & Relationship share "${name}". Removing attribute.`);
-        delete entity.attributes[name];
-      }
-    }
-  }
-
-  return blendedModel;
-}
-
-// ✅ Validate that blended model is safe before usage
-const RESERVED_WORDS = new Set([
-  'table', 'schema', 'select', 'insert', 'update', 'delete',
-  'from', 'where', 'join', 'group', 'order', 'having',
-  'user', 'password', 'column', 'index', 'view', 'type'
-]);
-
-// ✅ Validate that blended model is safe before usage
-function validateBlendedModel(blendedModel: any): void {
-  const entities = blendedModel.entities || [];
-  if (!Array.isArray(entities)) {
-    throw new Error('Entities must be an array');
-  }
-
-  for (const entity of entities) {
-    if (!entity.name || typeof entity.name !== 'string') {
-      throw new Error('Each entity must have a valid name');
-    }
-    const entityName = entity.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
-    if (/^\d+$/.test(entityName) || RESERVED_WORDS.has(entityName)) {
-      throw new Error(`Invalid entity name: ${entityName}`);
-    }
-
-    const attributes = entity.attributes || {};
-    const attributeNames = new Set<string>();
-    const attributesArray = typeof attributes === 'object' && !Array.isArray(attributes)
-      ? Object.entries(attributes).map(([name, type]) => ({ name, type }))
-      : attributes;
-
-    for (const attr of attributesArray) {
-      const attrName = attr.name || attr;
-      if (!attrName || typeof attrName !== 'string') {
-        throw new Error(`Invalid attribute name in entity ${entity.name}`);
-      }
-      const columnName = attrName.toLowerCase();
-      if (!/^[a-z_][a-z0-9_]*$/.test(columnName) || /^\d+$/.test(columnName) || RESERVED_WORDS.has(columnName)) {
-        throw new Error(`Invalid attribute name "${attrName}" in entity ${entity.name}: Must be lowercase, alphanumeric with underscores, and not a reserved word`);
-      }
-      if (attributeNames.has(columnName)) {
-        throw new Error(`Duplicate attribute name "${attrName}" in entity ${entity.name}`);
-      }
-      attributeNames.add(columnName);
-    }
-
-    const relationships = entity.relationships || {};
-    for (const [relName, relTarget] of Object.entries(relationships)) {
-      const cleanRelName = relName.toLowerCase();
-      if (!/^[a-z_][a-z0-9_]*$/.test(cleanRelName) || /^\d+$/.test(cleanRelName) || RESERVED_WORDS.has(cleanRelName)) {
-        throw new Error(`Invalid relationship name "${relName}" in entity ${entity.name}: Must be lowercase, alphanumeric with underscores, and not a reserved word`);
-      }
-      if (attributeNames.has(cleanRelName)) {
-        throw new Error(`Relationship name "${relName}" conflicts with attribute name in entity ${entity.name}`);
-      }
-    }
-  }
 }
 
 async function createTableFromModel(blendedModel: any, serviceDraft: any, serviceSchema: string) {
@@ -350,6 +274,7 @@ export async function POST({ request, locals, params }) {
   // Generate blended model
   let blendedModel = { service_type: 'Unknown', entities: [] };
   let spec = '';
+  let contractUI: any = null;
   try {
     const openai = new OpenAI({
       apiKey: OPENAI_API_KEY,
@@ -357,7 +282,7 @@ export async function POST({ request, locals, params }) {
       maxRetries: 3
     });
     const blendResponse = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       response_format: { type: "json_object" },
       messages: [
         {
@@ -408,9 +333,17 @@ Frameworks: ${serviceDraft.frameworks.join(', ')}`
     // Now validate after fixing
     validateBlendedModel(blendedModel);
 
+    // ✅ Generate contract UI from the validated blended model
+    contractUI = buildContractUIFromModel(blendedModel);
+
   } catch (e) {
     console.error('AI Blend failed:', e);
     throw error(503, `AI model failed to generate service: ${e.message}`);
+  }
+
+  // ✅ Ensure contractUI has a fallback if generation failed
+  if (!contractUI) {
+    contractUI = buildContractUIFromModel(blendedModel);
   }
 
   // Generate service spec
@@ -421,7 +354,7 @@ Frameworks: ${serviceDraft.frameworks.join(', ')}`
       maxRetries: 3
     });
     const specResponse = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       messages: [
         {
           role: 'system',
@@ -460,7 +393,9 @@ Rules:
 
   const newVersion = (existing?.[0]?.version ?? 0) + 1;
 
-  const { error: insertError } = await supabase.from('services').insert({
+  const { data: serviceInsert, error: insertError } = await supabase
+  .from('services')
+  .insert({
     user_id: session.user.id,
     prompt,
     spec,
@@ -469,28 +404,142 @@ Rules:
     blended_model: blendedModel,
     created_at: new Date().toISOString(),
     frameworks: serviceDraft.frameworks
-  });
+  })
+  .select('id') // 👈 needed to get service_id (bigint)
+  .single();
 
-  if (insertError) {
-    console.error('❌ Metadata insert failed:', insertError);
-    throw error(500, 'Service metadata save failed.');
+if (insertError || !serviceInsert) {
+  console.error('❌ Metadata insert failed:', insertError);
+  throw error(500, 'Service metadata save failed.');
+}
+
+// ✅ Create the default manifest
+const defaultManifest = {
+  name: serviceDraft.servicename || serviceSchema,
+  type: 'module',
+  version: '0.1.0',
+  created_by: session.user.email,
+  origin_prompt: prompt,
+  contract_ui: contractUI,
+  data_model: {
+    blended_model: blendedModel
+  },
+  provenance: {
+    created_at: new Date().toISOString(),
+    created_via: 'AI_ASSISTED',
+    source_prompt: prompt,
+    derived_from: null
+  },
+  api: {
+    openapi_spec: null,
+    endpoints: []
+  },
+  rules: {
+    global_policies: [],
+    service_constraints: {}
+  },
+  dependencies: {
+    uses_services: [],
+    external_apis: [],
+    publishes_events: [],
+    subscribes_events: []
+  },
+  permissions: {
+    editable_by: ['Service Creator'],
+    deployable_by: ['Service Creator'],
+    access_roles: ['Consumer']
+  },
+  validation: {
+    last_validated: null,
+    validated_by: null,
+    issues_found: 0,
+    suggestions: []
+  },
+  inherits_from: [],
+  overrides: {}
+};
+
+// ✅ Insert manifest via RPC
+const { error: manifestInsertError } = await supabaseAdmin.rpc('insert_manifest', {
+  in_service_id: serviceInsert.id,
+  in_manifest: defaultManifest
+});
+
+if (manifestInsertError) {
+  console.error('❌ Manifest insert failed via RPC:', manifestInsertError);
+  throw error(500, 'Manifest creation via RPC failed.');
+}
+
+return json({
+  spec,
+  blendedModel,
+  version: newVersion,
+  service_schema: serviceSchema,
+  message: `Service version ${newVersion} generated and saved.`,
+  service: {
+    id: serviceInsert.id,
+    user_id: session.user.id,
+    prompt,
+    spec,
+    version: newVersion,
+    service_schema: serviceSchema,
+    blended_model: blendedModel,
+    created_at: new Date().toISOString(),
+    frameworks: serviceDraft.frameworks
+  }
+});
+}
+
+export async function GET({ locals }) {
+  console.log('🟢 GET /api/osp/service reached!');
+  const supabase = locals.supabase;
+  let sessionResult = locals.session;
+
+  if (sessionResult?.error) {
+    throw error(500, `Session error: ${sessionResult.error.message}`);
+  }
+
+  const session = sessionResult?.data?.session;
+  if (!session) {
+    throw error(401, 'Unauthorized - No active session detected.');
+  }
+
+  // Get the latest service for this user
+  const { data: service, error: fetchError } = await supabase
+    .from('services')
+    .select('*')
+    .eq('user_id', session.user.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (fetchError) {
+    console.error('❌ Failed to fetch latest service:', fetchError);
+    throw error(500, 'Failed to fetch latest service');
+  }
+
+  if (!service) {
+    return json({ serviceDraft: null });
+  }
+
+  // Now also get the latest corresponding manifest
+  const { data: manifestRow, error: manifestError } = await supabaseAdmin
+    .schema('osp_metadata')
+    .from('service_manifests')
+    .select('id')
+    .eq('service_id', service.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle(); // ✅ SAFER
+
+  if (manifestError) {
+    console.error('❌ Failed to fetch latest manifest for service:', manifestError);
   }
 
   return json({
-    spec,
-    blendedModel,
-    version: newVersion,
-    service_schema: serviceSchema,
-    message: `Service version ${newVersion} generated and saved.`,
-    service: {
-      user_id: session.user.id,
-      prompt,
-      spec,
-      version: newVersion,
-      service_schema: serviceSchema,
-      blended_model: blendedModel,
-      created_at: new Date().toISOString(),
-      frameworks: serviceDraft.frameworks
+    serviceDraft: {
+      ...service,
+      manifest_id: manifestRow?.id || null
     }
   });
 }

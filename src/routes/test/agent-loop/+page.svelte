@@ -17,6 +17,11 @@
   let hardcoreRule = '';
   let starting = false;
 
+  // Most recent service identifiers
+  let latestManifestId: string = '';
+  let latestServiceId: number = 0;
+  let serviceError: string = '';
+
   onMount(async () => {
     const res = await fetch('/api/agent-event');
     const data = await res.json();
@@ -44,9 +49,30 @@
         hardcoreRule = ruleData.content_md;
       }
     }
+
+    // Fetch the latest service_id and manifest_id
+    try {
+      const latestServiceRes = await fetch('/api/osp/service');
+      const latestServiceData = await latestServiceRes.json();
+      if (latestServiceData?.serviceDraft) {
+        latestManifestId = latestServiceData.serviceDraft.manifest_id;
+        latestServiceId = latestServiceData.serviceDraft.id;
+        serviceError = '';
+      } else {
+        serviceError = 'No service found. Please create a service first.';
+      }
+    } catch (err) {
+      console.error('❌ Failed to fetch latest service ID', err);
+      serviceError = 'Failed to fetch service. Please try again.';
+    }
   });
 
   async function startAgentLoop() {
+    if (!latestServiceId) {
+      message = `❌ ${serviceError}`;
+      return;
+    }
+
     isLoading = true;
     message = '⏳ Starting agent run...';
     runId = '';
@@ -55,7 +81,10 @@
       const startRes = await fetch('/api/agent/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trigger: 'manual_test_start' })
+        body: JSON.stringify({ 
+          trigger: 'manual_test_start',
+          service_id: latestServiceId
+        })
       });
 
       const startData = await startRes.json();

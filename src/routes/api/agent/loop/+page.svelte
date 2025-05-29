@@ -11,12 +11,18 @@
   let notes = '';
   let decision = '';
   let hardcoreRule = '';
+  let violatedPolicies: string[] = [];
+  let violatedHardcoreRules: string[] = [];
 
   onMount(async () => {
     const res = await fetch('/api/agent-event');
     const data = await res.json();
-    console.log('Response:', data); // ✅ Add this for debug
+    console.log('Response:', data);
     pendingEvent = data.event;
+
+    // Extract additional structured fields
+    violatedPolicies = pendingEvent?.violated_policies || [];
+    violatedHardcoreRules = pendingEvent?.violated_hardcore_rules || [];
 
     // Safe JSON parsing for event_description
     try {
@@ -88,6 +94,25 @@
       </ul>
     {/if}
 
+    {#if violatedPolicies.length}
+      <hr />
+      <h3>🚨 Violated Manifest Policies</h3>
+      <ul>
+        {#each violatedPolicies as policy}
+          <li>{policy}</li>
+        {/each}
+      </ul>
+    {/if}
+
+    {#if violatedHardcoreRules.length}
+      <h3>🧱 Violated Hardcore Rules</h3>
+      <ul>
+        {#each violatedHardcoreRules as rule}
+          <li>{rule}</li>
+        {/each}
+      </ul>
+    {/if}
+
     {#if hardcoreRule}
       <hr />
       <h3>🚨 Hard Core Rule Triggered</h3>
@@ -124,3 +149,4 @@
     font-family: monospace;
   }
 </style>
+
