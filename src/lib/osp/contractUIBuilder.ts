@@ -3,6 +3,9 @@
  * This creates the "sentences" from the component "words" for dynamic UI generation.
  */
 
+import { buildWorkflowsFromModel } from './workflowBuilder';
+import type { WorkflowManifest } from '$lib/types/workflow';
+
 interface ComponentField {
   field: string;
   type: string;
@@ -23,18 +26,21 @@ interface UIComponent {
 }
 
 interface UIPage {
+  id: string;
   path: string;
-  layout: string;
-  entity?: string;
-  components: string[];
   title: string;
   description?: string;
+  layout: string;
+  components: string[];
 }
 
 interface ContractUI {
   service_type: string;
+  service_name?: string; // Add service name for data flow
+  entities: any[]; // Add entities array for easy component access
   pages: UIPage[];
   components: UIComponent[];
+  workflows?: WorkflowManifest; // Add workflows to contract UI
   navigation: {
     type: string;
     items: Array<{ label: string; path: string; icon?: string }>;
@@ -43,37 +49,113 @@ interface ContractUI {
     primary_color: string;
     layout: string;
     density: string;
+    date_format: string; // Global date formatting
+    date_placeholder: string; // Helper text for users
+    // ✨ Enhanced theme configuration
+    available_themes: Array<{
+      id: string;
+      name: string;
+      description: string;
+      css_file: string;
+      preview_colors: {
+        primary: string;
+        background: string;
+        text: string;
+      };
+    }>;
+    current_theme: string;
+    custom_css?: string; // Allow custom CSS overrides
+  };
+  // ✨ Layout configuration options
+  layout_options: {
+    available_layouts: Array<{
+      id: string;
+      name: string;
+      description: string;
+      sidebar_width: number;
+      header_height: number;
+      content_padding: number;
+    }>;
+    current_layout: string;
+  };
+  global_settings: {
+    success_color: string;
+    error_color: string;
+    warning_color: string;
+    info_color: string;
   };
 }
 
-export function buildContractUIFromModel(blendedModel: any): ContractUI {
+export function buildContractUIFromModel(blendedModel: any, serviceName?: string): ContractUI {
   if (!blendedModel?.entities) {
     return {
       service_type: 'unknown',
+      service_name: serviceName || 'Unnamed Service',
+      entities: [],
       pages: [],
       components: [],
+      workflows: undefined,
       navigation: { type: 'sidebar', items: [] },
-      theme: { primary_color: '#2563eb', layout: 'modern', density: 'comfortable' }
+      theme: { 
+        primary_color: '#2563eb', 
+        layout: 'modern', 
+        density: 'comfortable',
+        date_format: 'MM/DD/YYYY', // Global default - US format for now
+        date_placeholder: 'Enter date (MM/DD/YYYY)',
+        // ✨ Enhanced theme configuration
+        available_themes: [],
+        current_theme: 'professional',
+        custom_css: ''
+      },
+      layout_options: {
+        available_layouts: [],
+        current_layout: 'default'
+      },
+      global_settings: {
+        success_color: '#16a34a', // Green for success
+        error_color: '#dc2626',   // Red for errors  
+        warning_color: '#d97706', // Orange for warnings
+        info_color: '#2563eb'     // Blue for info
+      }
     };
   }
 
-  // Generate pages: Dashboard + one page per entity
-  const pages: UIPage[] = [
+  // ✨ Generate workflows from blended model
+  const workflows = buildWorkflowsFromModel(blendedModel, serviceName || 'unknown');
+
+  // Generate pages
+  const pages = [
+    // Dashboard page
     {
+      id: 'dashboard',
       path: '/dashboard',
+      title: 'Dashboard',
+      description: `Dashboard and quick actions for your ${serviceName || 'service'}`,
       layout: 'dashboard',
-      title: 'Service Overview',
-      description: 'Dashboard and quick actions for your service',
-      components: ['service_overview', 'quick_stats', 'recent_activity']
+      components: ['service_overview', 'quick_stats', 'recent_activity', 'workflow_summary']
     },
-    ...blendedModel.entities.map((entity: any) => ({
-      path: `/${entity.name.toLowerCase()}`,
+    // Workflows overview page
+    {
+      id: 'workflows',
+      path: '/workflows',
+      title: 'Workflows',
+      description: 'Manage and monitor automated workflows',
       layout: 'entity_manager',
-      entity: entity.name,
-      title: entity.name.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
-      description: `Manage ${entity.name} records`,
-      components: [`${entity.name}_form`, `${entity.name}_table`, `${entity.name}_filters`]
-    }))
+      components: ['workflow_list', 'workflow_triggers']
+    },
+    // Entity-specific pages
+    ...blendedModel.entities.map((entity: any) => {
+      const entityDisplayName = entity.name.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+      
+      return {
+        id: `${entity.name}_page`,
+        path: `/${entity.name.toLowerCase()}`,
+        title: entityDisplayName,
+        description: `Manage ${entityDisplayName.toLowerCase()} records`,
+        layout: 'entity_manager',
+        components: [`${entity.name}_form`, `${entity.name}_table`, `${entity.name}_filters`]
+      };
+    })
   ];
 
   // Generate reusable UI components (the "words")
@@ -81,11 +163,15 @@ export function buildContractUIFromModel(blendedModel: any): ContractUI {
     // Dashboard components
     {
       id: 'service_overview',
-      type: 'info_card',
+      type: 'service_info_card',
       layout: 'horizontal',
       metadata: {
         title: 'Service Information',
-        content: `${blendedModel.service_type || 'Custom'} Service`
+        service_type: blendedModel.service_type || 'Custom',
+        service_name: serviceName || 'Unnamed Service',
+        show_service_name: true,
+        show_schema: true,
+        show_type: true
       }
     },
     {
@@ -93,11 +179,17 @@ export function buildContractUIFromModel(blendedModel: any): ContractUI {
       type: 'stats_grid',
       layout: 'grid',
       metadata: {
+        title: 'Entity Statistics',
         stats: blendedModel.entities.map((entity: any) => ({
           label: entity.name.replace(/_/g, ' '),
           entity: entity.name,
           icon: getEntityIcon(entity.name)
-        }))
+        })),
+        error_fallback: {
+          message: 'Unable to load statistics',
+          show_placeholder: true,
+          placeholder_text: 'Statistics will appear here once data is available'
+        }
       }
     },
     {
@@ -106,7 +198,62 @@ export function buildContractUIFromModel(blendedModel: any): ContractUI {
       layout: 'vertical',
       metadata: {
         title: 'Recent Activity',
-        limit: 10
+        limit: 10,
+        mock_data: false, // Skip mock data per user feedback
+        empty_state: {
+          message: 'No recent activity',
+          show_placeholder: true
+        }
+      }
+    },
+    // ✨ Workflow components
+    {
+      id: 'workflow_summary',
+      type: 'workflow_status',
+      layout: 'horizontal',
+      metadata: {
+        title: 'Active Workflows',
+        show_count: true,
+        show_recent: true,
+        limit: 5
+      }
+    },
+    {
+      id: 'workflow_list',
+      type: 'workflow_list',
+      layout: 'vertical',
+      metadata: {
+        title: 'Available Workflows',
+        workflows: workflows.workflows.map((w: any) => ({
+          id: w.id,
+          name: w.name,
+          description: w.description,
+          trigger_type: w.triggers?.[0]?.type || 'manual',
+          industry_source: w.industry?.framework || 'unknown'
+        })),
+        show_triggers: true,
+        show_status: true
+      }
+    },
+    {
+      id: 'workflow_status_grid',
+      type: 'workflow_status_grid',
+      layout: 'grid',
+      metadata: {
+        title: 'Workflow Executions',
+        show_recent: true,
+        limit: 20,
+        columns: ['workflow', 'status', 'started', 'duration']
+      }
+    },
+    {
+      id: 'workflow_triggers',
+      type: 'workflow_triggers',
+      layout: 'vertical',
+      metadata: {
+        title: 'Manual Triggers',
+        workflows: workflows.workflows.filter((w: any) => w.triggers?.[0]?.type === 'manual'),
+        show_descriptions: true
       }
     },
     // Entity-specific components
@@ -131,7 +278,16 @@ export function buildContractUIFromModel(blendedModel: any): ContractUI {
           metadata: {
             title: `Add New ${entity.name.replace(/_/g, ' ')}`,
             submitText: 'Save',
-            resetOnSubmit: true
+            resetOnSubmit: true,
+            success_message: 'Record saved successfully',
+            error_fallback: {
+              message: 'Unable to save record',
+              show_details: true
+            },
+            // ✨ Link to workflows that can be triggered by this form
+            workflow_triggers: workflows.workflows
+              .filter((w: any) => w.triggers?.[0]?.type === 'form_submit' && w.triggers?.[0]?.form_id === `${entity.name}_form`)
+              .map((w: any) => ({ id: w.id, name: w.name }))
           }
         },
         // Table component for listing
@@ -151,7 +307,17 @@ export function buildContractUIFromModel(blendedModel: any): ContractUI {
           metadata: {
             pageSize: 25,
             exportable: true,
-            searchable: true
+            searchable: true,
+            empty_state: {
+              message: `No ${entity.name.replace(/_/g, ' ')} records found`,
+              show_add_button: true,
+              add_button_text: `Add First ${entity.name.replace(/_/g, ' ')}`
+            },
+            error_fallback: {
+              message: 'Unable to load records',
+              show_retry: true,
+              retry_text: 'Try Again'
+            }
           }
         },
         // Filter component
@@ -170,11 +336,12 @@ export function buildContractUIFromModel(blendedModel: any): ContractUI {
     })
   ];
 
-  // Generate navigation
+  // Generate navigation (including workflows)
   const navigation = {
     type: 'sidebar',
     items: [
       { label: 'Dashboard', path: '/dashboard', icon: 'dashboard' },
+      { label: 'Workflows', path: '/workflows', icon: 'workflow' },
       ...blendedModel.entities.map((entity: any) => ({
         label: entity.name.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
         path: `/${entity.name.toLowerCase()}`,
@@ -185,13 +352,83 @@ export function buildContractUIFromModel(blendedModel: any): ContractUI {
 
   return {
     service_type: blendedModel.service_type || 'custom',
+    service_name: serviceName || 'Unnamed Service',
+    entities: blendedModel.entities,
     pages,
     components,
+    workflows, // ✨ Include generated workflows
     navigation,
     theme: {
       primary_color: '#2563eb',
       layout: 'modern',
-      density: 'comfortable'
+      density: 'comfortable',
+      date_format: 'MM/DD/YYYY', // Global default - US format for now
+      date_placeholder: 'Enter date (MM/DD/YYYY)',
+      // ✨ Enhanced theme configuration
+      available_themes: [
+        {
+          id: 'professional',
+          name: 'Professional',
+          description: 'Clean, enterprise-ready styling for business applications',
+          css_file: '/themes/professional.css',
+          preview_colors: {
+            primary: '#1e40af',
+            background: '#f8fafc',
+            text: '#0f172a'
+          }
+        },
+        {
+          id: 'dark',
+          name: 'Dark',
+          description: 'Professional dark mode for comfortable viewing',
+          css_file: '/themes/dark.css',
+          preview_colors: {
+            primary: '#3b82f6',
+            background: '#0f172a',
+            text: '#f1f5f9'
+          }
+        },
+        {
+          id: 'minimal',
+          name: 'Minimal',
+          description: 'Clean, simplified design for focus and clarity',
+          css_file: '/themes/minimal.css',
+          preview_colors: {
+            primary: '#374151',
+            background: '#ffffff',
+            text: '#111827'
+          }
+        }
+      ],
+      current_theme: 'professional',
+      custom_css: ''
+    },
+    layout_options: {
+      available_layouts: [
+        {
+          id: 'standard',
+          name: 'Standard',
+          description: 'Balanced layout with comfortable spacing',
+          sidebar_width: 280,
+          header_height: 60,
+          content_padding: 24
+        },
+        {
+          id: 'compact',
+          name: 'Compact',
+          description: 'Space-efficient layout for smaller screens',
+          sidebar_width: 240,
+          header_height: 60,
+          content_padding: 16
+        }
+      ],
+      current_layout: 'standard'
+    },
+    global_settings: {
+      success_color: '#16a34a', // Green for success
+      error_color: '#dc2626',   // Red for errors
+      warning_color: '#d97706', // Orange for warnings  
+      info_color: '#2563eb'     // Blue for info
     }
   };
 }
@@ -246,35 +483,65 @@ function isFieldRequired(fieldName: string, type: string): boolean {
 
 function getEntityIcon(entityName: string): string {
   const iconMapping: Record<string, string> = {
-    'user': 'person',
-    'customer': 'person',
-    'product': 'inventory',
-    'item': 'inventory',
-    'inventory': 'inventory',
+    // Restaurant-specific entities
     'order': 'shopping_cart',
-    'purchase': 'shopping_cart',
-    'sale': 'point_of_sale',
-    'invoice': 'receipt',
+    'table': 'table_view',
+    'reservation': 'event',
+    'inventory': 'inventory',
+    'inventory_item': 'inventory',
+    'customer': 'person',
+    'staff': 'group',
+    'menu_item': 'restaurant_menu',
+    'menu_category': 'category',
     'payment': 'payment',
-    'category': 'category',
+    'kitchen_workflow': 'kitchen',
+    'customer_feedback': 'star',
+    
+    // Generic business entities
+    'user': 'person',
+    'product': 'shopping_bag',
+    'item': 'shopping_bag',
+    'sale': 'attach_money',
+    'purchase': 'shopping_cart',
+    'invoice': 'receipt',
+    'category': 'folder',
     'tag': 'label',
     'store': 'store',
     'location': 'place',
-    'address': 'place',
+    'address': 'location_on',
     'contact': 'contact_phone',
     'message': 'message',
     'notification': 'notifications',
-    'report': 'assessment',
+    'report': 'analytics',
     'setting': 'settings',
-    'config': 'settings'
+    'config': 'tune',
+    'workflow': 'workflow',
+    'process': 'process',
+    'task': 'task_alt',
+    'project': 'work',
+    
+    // Fallback
+    'default': 'description'
   };
   
   const entityLower = entityName.toLowerCase();
+  
+  // Direct match first
+  if (iconMapping[entityLower]) {
+    return iconMapping[entityLower];
+  }
+  
+  // Pattern matching for compound names
   for (const [key, icon] of Object.entries(iconMapping)) {
     if (entityLower.includes(key)) {
       return icon;
     }
   }
   
-  return 'table_view'; // default icon
+  return iconMapping.default;
+}
+
+function getDefaultTheme(serviceType: string): string {
+  // Always default to professional theme for enterprise confidence
+  return 'professional';
 } 

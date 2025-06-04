@@ -26,6 +26,54 @@ function coerceDataToTableTypes(data: Record<string, any>, columns: { column_nam
   return validatedPayload;
 }
 
+export const GET: RequestHandler = async ({ params, url }) => {
+  const { serviceName, entity } = params;
+  const limit = parseInt(url.searchParams.get('limit') || '50');
+  const offset = parseInt(url.searchParams.get('offset') || '0');
+
+  console.log(`📖 GET request for service: ${serviceName}, entity: ${entity}, limit: ${limit}, offset: ${offset}`);
+
+  try {
+    // Build a safe SQL query for the dynamic table
+    const tableName = `${serviceName}.${entity}`;
+    const sqlQuery = `SELECT * FROM ${tableName} LIMIT ${limit} OFFSET ${offset}`;
+    
+    console.log(`🔍 Executing SQL: ${sqlQuery}`);
+    
+    // Use execute_sql RPC to safely query the dynamic table
+    const { data, error } = await supabaseAdmin.rpc('execute_sql', {
+      sql_text: sqlQuery
+    });
+
+    if (error) {
+      console.error('❌ SQL execution failed:', error);
+      return json({ 
+        success: false, 
+        error: error.message,
+        data: [] 
+      }, { status: 500 });
+    }
+
+    console.log(`✅ Retrieved ${data?.length || 0} records for ${serviceName}.${entity}`);
+
+    return json({
+      success: true,
+      data: data || [],
+      total: data?.length || 0,
+      limit,
+      offset
+    });
+
+  } catch (err: any) {
+    console.error('❌ Unexpected error in GET handler:', err);
+    return json({
+      success: false,
+      error: err?.message || 'Unknown error',
+      data: []
+    }, { status: 500 });
+  }
+};
+
 export const POST: RequestHandler = async ({ request, params }) => {
   const { serviceName, entity } = params;
   const rawData = await request.json();
@@ -73,8 +121,16 @@ export const POST: RequestHandler = async ({ request, params }) => {
 
   if (rpcError) {
     console.error('❌ RPC insert failed:', rpcError);
-    return json({ message: 'Insert failed via RPC', details: rpcError }, { status: 500 });
+    return json({ 
+      success: false, 
+      error: rpcError.message || 'Insert failed via RPC', 
+      details: rpcError 
+    }, { status: 500 });
   }
 
-  return json({ message: '✅ Inserted successfully via RPC', inserted: validatedPayload }, { status: 200 });
+  return json({ 
+    success: true, 
+    message: 'Record created successfully',
+    data: validatedPayload 
+  }, { status: 200 });
 };

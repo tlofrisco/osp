@@ -1,6 +1,8 @@
 /**
- * UI Component Registry - The "vocabulary" of reusable components
- * This registry maps component types to their Svelte component files for dynamic loading
+ * 🎨 Dynamic UI Component Registry for OSP
+ * 
+ * Central registry for all UI components that can be dynamically loaded.
+ * Components are organized by category for better maintainability.
  */
 
 export interface ComponentConfig {
@@ -14,21 +16,29 @@ export interface ComponentConfig {
   metadata?: any;
 }
 
-// Component registry - maps types to dynamic imports
-// Only includes components that actually exist
-export const UI_COMPONENTS: Record<string, () => Promise<any>> = {
-  // Form components (existing)
+// Core UI Components
+const UI_COMPONENTS: Record<string, () => Promise<any>> = {
+  // Form Components
   'dynamic_form': () => import('./form/DynamicForm.svelte'),
   
-  // Data display components (existing)
-  'data_table': () => import('./data/DataTable.svelte'),
+  // Data Display Components  
   'info_card': () => import('./data/InfoCard.svelte'),
+  'data_table': () => import('./data/DataTable.svelte'),
   'stats_grid': () => import('./data/StatsGrid.svelte'),
   'activity_feed': () => import('./data/ActivityFeed.svelte'),
   
-  // Fallback components
-  'error_component': () => import('./fallback/ErrorComponent.svelte'),
-  'unknown_component': () => import('./fallback/UnknownComponent.svelte')
+  // Layout Components
+  'service_info_card': () => import('./data/ServiceInfoCard.svelte'),
+  
+  // Workflow Components
+  'workflow_status': () => import('./workflow/WorkflowStatus.svelte'),
+  'workflow_list': () => import('./workflow/WorkflowList.svelte'),
+  'workflow_status_grid': () => import('./workflow/WorkflowStatusGrid.svelte'),
+  'workflow_triggers': () => import('./workflow/WorkflowTriggers.svelte'),
+  
+  // Fallback Components
+  'unknown_component': () => import('./fallback/UnknownComponent.svelte'),
+  'error_component': () => import('./fallback/ErrorComponent.svelte')
 };
 
 // Components that will use fallbacks until implemented
@@ -56,11 +66,10 @@ const FALLBACK_MAPPINGS: Record<string, string> = {
   'sidebar_nav': 'info_card',
   'page_header': 'info_card',
   
-  // Workflow components -> use InfoCard as fallback
-  'workflow_status': 'info_card',
-  'approval_flow': 'info_card',
-  'process_timeline': 'info_card',
-  'task_queue': 'info_card'
+  // Workflow components -> use workflow fallbacks
+  'process_timeline': 'workflow_status',
+  'task_queue': 'workflow_list',
+  'approval_flow': 'workflow_triggers'
 };
 
 /**
@@ -94,14 +103,14 @@ export async function loadComponent(componentType: string): Promise<any> {
 }
 
 /**
- * Get all available component types (including fallbacks)
+ * Get all available component types
  */
-export function getAvailableComponentTypes(): string[] {
-  return [...Object.keys(UI_COMPONENTS), ...Object.keys(FALLBACK_MAPPINGS)];
+export function getAvailableComponents(): string[] {
+  return Object.keys(UI_COMPONENTS);
 }
 
 /**
- * Check if a component type is available (including fallbacks)
+ * Check if a component type is available
  */
 export function isComponentAvailable(componentType: string): boolean {
   return componentType in UI_COMPONENTS || componentType in FALLBACK_MAPPINGS;

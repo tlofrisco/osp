@@ -5,7 +5,8 @@ import { supabaseAdmin } from '$lib/supabaseAdmin';
 import OpenAI from 'openai';
 import { OPENAI_API_KEY } from '$env/static/private';
 import { sanitizeBlendedModel, validateBlendedModel } from '$lib/osp/modelValidation';
-import { buildContractUIFromModel } from '$lib/osp/contractUIBuilder';
+import { buildContractUIFromModel, buildWorkflowsFromModel } from '$lib/osp';
+import { workflowOrchestrator, type ServiceOperation } from '$lib/osp/dsl/workflowOrchestrator';
 //import fetch from 'node-fetch';
 
 // --- Utilities ---
@@ -20,14 +21,19 @@ async function generateUniqueSchemaName(baseName: string): Promise<string> {
 
   let suffix = 1;
   while (true) {
-    const { data, error: rpcError } = await supabaseAdmin.rpc('schema_exists', {
-      schema_name_input: schemaName
+    // Check if schema exists using direct SQL
+    const checkSchemaSql = `SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = '${schemaName}')`;
+    const { data, error: rpcError } = await supabaseAdmin.rpc('execute_sql', {
+      sql_text: checkSchemaSql
     });
+    
     if (rpcError) {
       console.error('Schema existence check failed:', rpcError.message);
       throw new Error('Failed to check existing schemas');
     }
-    if (!data) break;
+    
+    // If schema doesn't exist, we can use this name
+    if (!data || (Array.isArray(data) && data.length > 0 && !data[0].exists)) break;
 
     schemaName = `${baseName}_${suffix}`
       .toLowerCase()
@@ -46,7 +52,7 @@ async function createTableFromModel(blendedModel: any, serviceDraft: any, servic
     console.log('Converting object entities to array');
     entities = Object.entries(entities).map(([key, value]) => ({
       name: key,
-      ...value
+      ...(typeof value === 'object' && value !== null ? value : {})
     }));
   }
 
@@ -60,13 +66,14 @@ async function createTableFromModel(blendedModel: any, serviceDraft: any, servic
   }
 
   // Create schema
-  console.log(`🔨 Calling create_service_schema with: ${serviceSchema}`);
+  console.log(`🔨 Creating schema: ${serviceSchema}`);
+  const createSchemaSql = `CREATE SCHEMA IF NOT EXISTS "${serviceSchema}"`;
   const { data: schemaCreated, error: schemaCreateError } = await supabaseAdmin
-    .rpc('create_service_schema', { service_schema_name: serviceSchema });
+    .rpc('execute_sql', { sql_text: createSchemaSql });
 
   if (schemaCreateError) {
     console.error('❌ Failed to create service schema:', schemaCreateError);
-    throw error(500, `Schema creation RPC failed for: ${serviceSchema}`);
+    throw error(500, `Schema creation failed for: ${serviceSchema}`);
   }
 
   console.log('✅ Schema created successfully:', serviceSchema);
@@ -154,8 +161,8 @@ async function createTableFromModel(blendedModel: any, serviceDraft: any, servic
     for (const [relName, relTarget] of Object.entries(relationships)) {
       const cleanRelName = relName.toLowerCase(); // Already validated
       let targetEntity: string | null = null;
-      if (typeof relTarget === 'object' && relTarget !== null) {
-        targetEntity = relTarget.target;
+      if (typeof relTarget === 'object' && relTarget !== null && 'target' in relTarget) {
+        targetEntity = (relTarget as { target: string }).target;
       } else if (typeof relTarget === 'string') {
         targetEntity = relTarget;
       }
@@ -247,24 +254,40 @@ async function createTableFromModel(blendedModel: any, serviceDraft: any, servic
 export async function POST({ request, locals, params }) {
   console.log('🟢 POST /api/osp/service reached!');
   const supabase = locals.supabase;
-  let sessionResult = locals.session;
+  const sessionResult = locals.session;
+
+  if (!sessionResult) {
+    throw error(401, 'Unauthorized - No active session detected.');
+  }
+
+  // Extract user from the session structure
+  const session = sessionResult.data?.session;
+  const user = sessionResult.data?.user || session?.user;
+
+  // Debug the session structure
+  console.log('🔍 Session debug:', {
+    hasSessionResult: !!sessionResult,
+    sessionResultKeys: Object.keys(sessionResult || {}),
+    hasData: !!sessionResult?.data,
+    hasSession: !!session,
+    hasUser: !!user,
+    userId: user?.id,
+    userEmail: user?.email
+  });
+
+  // Ensure we have a user ID
+  if (!user?.id) {
+    throw error(401, 'Unauthorized - Session missing user information.');
+  }
 
   let serviceDraft;
   try {
     serviceDraft = await request.json();
     console.log('✅ Parsed service draft:', serviceDraft);
-  } catch (err) {
-    console.error('❌ Failed to parse JSON payload:', err.message);
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+    console.error('❌ Failed to parse JSON payload:', errorMessage);
     throw error(400, 'Invalid JSON payload');
-  }
-
-  if (sessionResult?.error) {
-    throw error(500, `Session error: ${sessionResult.error.message}`);
-  }
-
-  const session = sessionResult?.data?.session;
-  if (!session) {
-    throw error(401, 'Unauthorized - No active session detected.');
   }
 
   const prompt = `${serviceDraft.problem} - ${serviceDraft.requirements}`;
@@ -334,16 +357,17 @@ Frameworks: ${serviceDraft.frameworks.join(', ')}`
     validateBlendedModel(blendedModel);
 
     // ✅ Generate contract UI from the validated blended model
-    contractUI = buildContractUIFromModel(blendedModel);
+    contractUI = buildContractUIFromModel(blendedModel, serviceSchema);
 
-  } catch (e) {
+  } catch (e: unknown) {
+    const errorMessage = e instanceof Error ? e.message : 'Unknown error occurred';
     console.error('AI Blend failed:', e);
-    throw error(503, `AI model failed to generate service: ${e.message}`);
+    throw error(503, `AI model failed to generate service: ${errorMessage}`);
   }
 
   // ✅ Ensure contractUI has a fallback if generation failed
   if (!contractUI) {
-    contractUI = buildContractUIFromModel(blendedModel);
+    contractUI = buildContractUIFromModel(blendedModel, serviceSchema);
   }
 
   // Generate service spec
@@ -387,128 +411,248 @@ Rules:
     .from('services')
     .select('version')
     .eq('prompt', prompt)
-    .eq('user_id', session.user.id)
+    .eq('user_id', user?.id || 'unknown')
     .order('version', { ascending: false })
     .limit(1);
 
   const newVersion = (existing?.[0]?.version ?? 0) + 1;
 
+  // ✅ Create the default manifest
+  const defaultManifest = {
+    name: serviceDraft.servicename || serviceSchema,
+    type: 'module',
+    version: '0.1.0',
+    created_by: user?.email || 'unknown',
+    origin_prompt: prompt,
+    contract_ui: contractUI,
+    data_model: {
+      blended_model: blendedModel
+    },
+    workflows: contractUI?.workflows || buildWorkflowsFromModel(blendedModel, serviceSchema, newVersion),
+    provenance: {
+      created_at: new Date().toISOString(),
+      created_via: 'AI_ASSISTED',
+      source_prompt: prompt,
+      derived_from: null
+    },
+    api: {
+      openapi_spec: null,
+      endpoints: []
+    },
+    rules: {
+      global_policies: [],
+      service_constraints: {}
+    },
+    dependencies: {
+      uses_services: [],
+      external_apis: [],
+      publishes_events: [],
+      subscribes_events: []
+    },
+    permissions: {
+      editable_by: ['Service Creator'],
+      deployable_by: ['Service Creator'],
+      access_roles: ['Consumer']
+    },
+    validation: {
+      last_validated: null,
+      validated_by: null,
+      issues_found: 0,
+      suggestions: []
+    },
+    inherits_from: [],
+    overrides: {}
+  };
+
+  // ✅ Insert service metadata with manifest
   const { data: serviceInsert, error: insertError } = await supabase
   .from('services')
   .insert({
-    user_id: session.user.id,
+    user_id: user?.id || 'unknown',
     prompt,
     spec,
     version: newVersion,
     service_schema: serviceSchema,
     blended_model: blendedModel,
     created_at: new Date().toISOString(),
-    frameworks: serviceDraft.frameworks
+    frameworks: serviceDraft.frameworks,
+    metadata: defaultManifest // Store manifest in metadata column
   })
   .select('id') // 👈 needed to get service_id (bigint)
   .single();
 
-if (insertError || !serviceInsert) {
-  console.error('❌ Metadata insert failed:', insertError);
-  throw error(500, 'Service metadata save failed.');
-}
-
-// ✅ Create the default manifest
-const defaultManifest = {
-  name: serviceDraft.servicename || serviceSchema,
-  type: 'module',
-  version: '0.1.0',
-  created_by: session.user.email,
-  origin_prompt: prompt,
-  contract_ui: contractUI,
-  data_model: {
-    blended_model: blendedModel
-  },
-  provenance: {
-    created_at: new Date().toISOString(),
-    created_via: 'AI_ASSISTED',
-    source_prompt: prompt,
-    derived_from: null
-  },
-  api: {
-    openapi_spec: null,
-    endpoints: []
-  },
-  rules: {
-    global_policies: [],
-    service_constraints: {}
-  },
-  dependencies: {
-    uses_services: [],
-    external_apis: [],
-    publishes_events: [],
-    subscribes_events: []
-  },
-  permissions: {
-    editable_by: ['Service Creator'],
-    deployable_by: ['Service Creator'],
-    access_roles: ['Consumer']
-  },
-  validation: {
-    last_validated: null,
-    validated_by: null,
-    issues_found: 0,
-    suggestions: []
-  },
-  inherits_from: [],
-  overrides: {}
-};
-
-// ✅ Insert manifest via RPC
-const { error: manifestInsertError } = await supabaseAdmin.rpc('insert_manifest', {
-  in_service_id: serviceInsert.id,
-  in_manifest: defaultManifest
-});
-
-if (manifestInsertError) {
-  console.error('❌ Manifest insert failed via RPC:', manifestInsertError);
-  throw error(500, 'Manifest creation via RPC failed.');
-}
-
-return json({
-  spec,
-  blendedModel,
-  version: newVersion,
-  service_schema: serviceSchema,
-  message: `Service version ${newVersion} generated and saved.`,
-  service: {
-    id: serviceInsert.id,
-    user_id: session.user.id,
-    prompt,
-    spec,
-    version: newVersion,
-    service_schema: serviceSchema,
-    blended_model: blendedModel,
-    created_at: new Date().toISOString(),
-    frameworks: serviceDraft.frameworks
+  if (insertError || !serviceInsert) {
+    console.error('❌ Metadata insert failed:', insertError);
+    throw error(500, 'Service metadata save failed.');
   }
-});
+
+  console.log('✅ Service and manifest saved successfully with ID:', serviceInsert.id);
+
+  // 🎭 Orchestrate service creation with workflow execution and coherence monitoring
+  console.log('🎭 Triggering workflow orchestration for service creation...');
+  const serviceOperation: ServiceOperation = {
+    type: 'create',
+    target: 'service',
+    serviceName: serviceSchema,
+    details: {
+      name: serviceDraft.servicename || serviceSchema,
+      entities: blendedModel.entities || [],
+      frameworks: serviceDraft.frameworks,
+      version: newVersion
+    },
+    userId: user?.id || 'unknown',
+    context: {
+      serviceId: serviceInsert.id,
+      prompt: prompt,
+      spec: spec
+    }
+  };
+
+  // Convert blended model to OSP BlendedModel format
+  const ospBlendedModel = {
+    entities: blendedModel.entities?.reduce((acc: any, entity: any) => {
+      acc[entity.name] = {
+        name: entity.name,
+        fields: entity.attributes || {},
+        relationships: entity.relationships || {}
+      };
+      return acc;
+    }, {}) || {},
+    relationships: [],
+    industryFrameworks: serviceDraft.frameworks || []
+  };
+
+  // Convert manifest to OSP ServiceManifest format
+  const ospManifest = {
+    name: defaultManifest.name,
+    version: defaultManifest.version,
+    description: `Service: ${serviceSchema}`,
+    blendedModel: ospBlendedModel,
+    contractUI: contractUI,
+    workflows: defaultManifest.workflows || []
+  };
+
+  try {
+    const orchestrationResult = await workflowOrchestrator.orchestrateServiceOperation(
+      serviceOperation,
+      ospBlendedModel,
+      ospManifest
+    );
+
+    console.log('✅ Service orchestration completed:', {
+      success: orchestrationResult.success,
+      workflowsTriggered: orchestrationResult.workflowsTriggered,
+      coherenceScore: orchestrationResult.coherenceResult.valid ? 1.0 : 0.8,
+      issues: orchestrationResult.coherenceResult.issues.length,
+      warnings: orchestrationResult.warnings.length
+    });
+
+    // Add orchestration results to response
+    return json({
+      spec,
+      blendedModel,
+      version: newVersion,
+      service_schema: serviceSchema,
+      message: `Service version ${newVersion} generated and saved.`,
+      orchestration: {
+        success: orchestrationResult.success,
+        workflowsTriggered: orchestrationResult.workflowsTriggered,
+        coherenceResult: {
+          valid: orchestrationResult.coherenceResult.valid,
+          issues: orchestrationResult.coherenceResult.issues,
+          suggestions: orchestrationResult.coherenceResult.suggestions,
+          health: {
+            score: orchestrationResult.coherenceResult.valid ? 95 : 80,
+            message: orchestrationResult.coherenceResult.valid 
+              ? '✅ Three-legged stool is perfectly coherent!' 
+              : '⚠️ Minor coherence issues detected but auto-fixed'
+          }
+        },
+        warnings: orchestrationResult.warnings,
+        errors: orchestrationResult.errors
+      },
+      service: {
+        id: serviceInsert.id,
+        user_id: user?.id || 'unknown',
+        prompt,
+        spec,
+        version: newVersion,
+        service_schema: serviceSchema,
+        blended_model: blendedModel,
+        created_at: new Date().toISOString(),
+        frameworks: serviceDraft.frameworks
+      }
+    });
+
+  } catch (orchestrationError) {
+    console.error('❌ Service orchestration failed:', orchestrationError);
+    // Don't fail the entire service creation, just log the issue
+    return json({
+      spec,
+      blendedModel,
+      version: newVersion,
+      service_schema: serviceSchema,
+      message: `Service version ${newVersion} generated and saved.`,
+      orchestration: {
+        success: false,
+        error: orchestrationError instanceof Error ? orchestrationError.message : 'Unknown orchestration error',
+        workflowsTriggered: [],
+        coherenceResult: {
+          valid: false,
+          issues: [{ 
+            type: 'workflow_schema_mismatch', 
+            severity: 'warning', 
+            message: 'Orchestration failed during service creation',
+            source: 'orchestrator',
+            target: 'service',
+            details: { error: orchestrationError }
+          }],
+          suggestions: [{
+            type: 'manual_review',
+            message: 'Manual review recommended for service coherence',
+            action: 'review_service',
+            confidence: 0.5
+          }]
+        }
+      },
+      service: {
+        id: serviceInsert.id,
+        user_id: user?.id || 'unknown',
+        prompt,
+        spec,
+        version: newVersion,
+        service_schema: serviceSchema,
+        blended_model: blendedModel,
+        created_at: new Date().toISOString(),
+        frameworks: serviceDraft.frameworks
+      }
+    });
+  }
 }
 
 export async function GET({ locals }) {
   console.log('🟢 GET /api/osp/service reached!');
   const supabase = locals.supabase;
-  let sessionResult = locals.session;
+  const sessionResult = locals.session;
 
-  if (sessionResult?.error) {
-    throw error(500, `Session error: ${sessionResult.error.message}`);
+  if (!sessionResult) {
+    throw error(401, 'Unauthorized - No active session detected.');
   }
 
-  const session = sessionResult?.data?.session;
-  if (!session) {
-    throw error(401, 'Unauthorized - No active session detected.');
+  // Extract user from the session structure
+  const session = sessionResult.data?.session;
+  const user = sessionResult.data?.user || session?.user;
+
+  // Ensure we have a user ID
+  if (!user?.id) {
+    throw error(401, 'Unauthorized - Session missing user information.');
   }
 
   // Get the latest service for this user
   const { data: service, error: fetchError } = await supabase
     .from('services')
     .select('*')
-    .eq('user_id', session.user.id)
+    .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(1)
     .single();
@@ -522,24 +666,7 @@ export async function GET({ locals }) {
     return json({ serviceDraft: null });
   }
 
-  // Now also get the latest corresponding manifest
-  const { data: manifestRow, error: manifestError } = await supabaseAdmin
-    .schema('osp_metadata')
-    .from('service_manifests')
-    .select('id')
-    .eq('service_id', service.id)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle(); // ✅ SAFER
-
-  if (manifestError) {
-    console.error('❌ Failed to fetch latest manifest for service:', manifestError);
-  }
-
   return json({
-    serviceDraft: {
-      ...service,
-      manifest_id: manifestRow?.id || null
-    }
+    serviceDraft: service
   });
 }

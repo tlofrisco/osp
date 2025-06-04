@@ -3,9 +3,12 @@
   
   export let config: any;
   export let serviceSchema: string;
+  export let serviceName: string = '';
   export let entityName: string;
   export let fields: any[] = [];
   export let metadata: any = {};
+  export let theme: any = {};
+  export let globalSettings: any = {};
   
   const dispatch = createEventDispatcher();
   
@@ -14,6 +17,12 @@
   let error = '';
   let validationErrors: Record<string, string> = {};
   let success = '';
+  
+  // Extract theme settings with fallbacks
+  const dateFormat = theme.date_format || 'MM/DD/YYYY';
+  const datePlaceholder = theme.date_placeholder || `Enter date (${dateFormat})`;
+  const successColor = globalSettings.success_color || '#16a34a';
+  const errorColor = globalSettings.error_color || '#dc2626';
   
   // Initialize form data
   $: {
@@ -132,47 +141,108 @@
     }
   }
   
-  function getInputType(field: any): string {
-    switch (field.widget || field.type) {
-      case 'number_input':
+  // Helper function to format field labels
+  function formatFieldLabel(fieldName: string): string {
+    return fieldName
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase())
+      .replace(/Id$/, 'ID');
+  }
+  
+  // Helper function to get user-friendly field description
+  function getFieldDescription(field: any): string | null {
+    const fieldType = field.type?.toLowerCase() || '';
+    
+    switch (fieldType) {
+      case 'date':
+        return 'Select or enter date';
+      case 'datetime':
+      case 'timestamptz':
+      case 'timestamp':
+        return 'Select date and time';
+      case 'email':
+        return 'Email address format required';
+      case 'phone':
+        return 'Phone number format';
+      case 'url':
+        return 'Website URL format';
       case 'numeric':
       case 'integer':
-        return 'number';
-      case 'email_input':
+      case 'number':
+        return 'Numbers only';
+      case 'boolean':
+        return 'Toggle on/off';
+      default:
+        return null; // Don't show description for basic text fields
+    }
+  }
+  
+  // Helper function to get field placeholder
+  function getFieldPlaceholder(field: any): string {
+    const fieldType = field.type?.toLowerCase() || '';
+    const fieldName = formatFieldLabel(field.field);
+    
+    switch (fieldType) {
+      case 'date':
+      case 'datetime':
+      case 'timestamptz':
+        return 'MM/DD/YYYY or select date';
+      case 'email':
+        return 'Enter email address';
+      case 'phone':
+        return 'Enter phone number';
+      case 'url':
+        return 'Enter website URL';
+      case 'numeric':
+      case 'integer':
+      case 'number':
+        return `Enter ${fieldName.toLowerCase()} (numbers only)`;
+      case 'text':
+      default:
+        return `Enter ${fieldName.toLowerCase()}`;
+    }
+  }
+  
+  // Helper function to get field input type
+  function getInputType(field: any): string {
+    const fieldType = field.type?.toLowerCase() || '';
+    
+    switch (fieldType) {
       case 'email':
         return 'email';
-      case 'date_picker':
-      case 'date':
-        return 'date';
-      case 'datetime_picker':
-      case 'timestamp':
-        return 'datetime-local';
-      case 'time_picker':
-      case 'time':
-        return 'time';
-      case 'url_input':
-      case 'url':
-        return 'url';
-      case 'phone_input':
       case 'phone':
         return 'tel';
+      case 'url':
+        return 'url';
+      case 'date':
+      case 'datetime':
+      case 'timestamptz':
+        return 'datetime-local';
+      case 'numeric':
+      case 'integer':
+      case 'number':
+        return 'number';
+      case 'password':
+        return 'password';
       default:
         return 'text';
     }
   }
-  
-  function formatFieldLabel(fieldName: string): string {
-    return fieldName
-      .replace(/_/g, ' ')
-      .replace(/\b\w/g, c => c.toUpperCase());
-  }
 </script>
 
-<div class="dynamic-form">
+<div class="dynamic-form" style="--success-color: {successColor}; --error-color: {errorColor};">
   <header class="form-header">
     <h3>{metadata.title || `Add ${entityName}`}</h3>
     {#if metadata.description}
       <p class="form-description">{metadata.description}</p>
+    {/if}
+    
+    <!-- Required fields explanation -->
+    {#if fields.some(f => f.required)}
+      <div class="required-fields-note">
+        <span class="required-indicator">*</span>
+        <span class="required-text">Required fields</span>
+      </div>
     {/if}
   </header>
   
@@ -184,8 +254,9 @@
           {#if field.required}
             <span class="required">*</span>
           {/if}
-          {#if field.type && field.type !== field.field}
-            <span class="field-type">({field.type})</span>
+          {#if getFieldDescription(field)}
+            {@const description = getFieldDescription(field)}
+            <span class="field-description">{description}</span>
           {/if}
         </label>
         
@@ -200,18 +271,91 @@
             <span class="toggle-slider"></span>
           </label>
         {:else}
-          <input
-            id={field.field}
-            type="text"
-            bind:value={formData[field.field]}
-            class="field-input"
-            class:error={validationErrors[field.field]}
-            placeholder={field.placeholder || `Enter ${formatFieldLabel(field.field).toLowerCase()}`}
-            required={field.required}
-            step={field.validation?.step || (field.type === 'numeric' ? 'any' : undefined)}
-            min={field.validation?.min}
-            max={field.validation?.max}
-          />
+          {@const inputType = getInputType(field)}
+          {#if inputType === 'number'}
+            <input
+              id={field.field}
+              type="number"
+              bind:value={formData[field.field]}
+              class="field-input"
+              class:error={validationErrors[field.field]}
+              placeholder={field.placeholder || getFieldPlaceholder(field)}
+              required={field.required}
+              step={field.validation?.step || (field.type === 'numeric' ? 'any' : undefined)}
+              min={field.validation?.min}
+              max={field.validation?.max}
+            />
+          {:else if inputType === 'email'}
+            <input
+              id={field.field}
+              type="email"
+              bind:value={formData[field.field]}
+              class="field-input"
+              class:error={validationErrors[field.field]}
+              placeholder={field.placeholder || getFieldPlaceholder(field)}
+              required={field.required}
+            />
+          {:else if inputType === 'date'}
+            <input
+              id={field.field}
+              type="date"
+              bind:value={formData[field.field]}
+              class="field-input"
+              class:error={validationErrors[field.field]}
+              placeholder={field.placeholder || getFieldPlaceholder(field)}
+              required={field.required}
+            />
+          {:else if inputType === 'datetime-local'}
+            <input
+              id={field.field}
+              type="datetime-local"
+              bind:value={formData[field.field]}
+              class="field-input"
+              class:error={validationErrors[field.field]}
+              placeholder={field.placeholder || getFieldPlaceholder(field)}
+              required={field.required}
+            />
+          {:else if inputType === 'time'}
+            <input
+              id={field.field}
+              type="time"
+              bind:value={formData[field.field]}
+              class="field-input"
+              class:error={validationErrors[field.field]}
+              placeholder={field.placeholder || getFieldPlaceholder(field)}
+              required={field.required}
+            />
+          {:else if inputType === 'url'}
+            <input
+              id={field.field}
+              type="url"
+              bind:value={formData[field.field]}
+              class="field-input"
+              class:error={validationErrors[field.field]}
+              placeholder={field.placeholder || getFieldPlaceholder(field)}
+              required={field.required}
+            />
+          {:else if inputType === 'tel'}
+            <input
+              id={field.field}
+              type="tel"
+              bind:value={formData[field.field]}
+              class="field-input"
+              class:error={validationErrors[field.field]}
+              placeholder={field.placeholder || getFieldPlaceholder(field)}
+              required={field.required}
+            />
+          {:else}
+            <input
+              id={field.field}
+              type="text"
+              bind:value={formData[field.field]}
+              class="field-input"
+              class:error={validationErrors[field.field]}
+              placeholder={field.placeholder || getFieldPlaceholder(field)}
+              required={field.required}
+            />
+          {/if}
         {/if}
         
         {#if validationErrors[field.field]}
@@ -276,6 +420,29 @@
     font-size: 0.875rem;
   }
   
+  .required-fields-note {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-top: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    background: #fef3c7;
+    border: 1px solid #fde68a;
+    border-radius: 4px;
+    font-size: 0.75rem;
+  }
+  
+  .required-indicator {
+    color: #dc2626;
+    font-weight: bold;
+    font-size: 0.875rem;
+  }
+  
+  .required-text {
+    color: #92400e;
+    font-weight: 500;
+  }
+  
   .form-content {
     display: flex;
     flex-direction: column;
@@ -302,6 +469,14 @@
     color: #6b7280;
     font-weight: normal;
     font-size: 0.75rem;
+  }
+  
+  .field-description {
+    color: #6b7280;
+    font-weight: normal;
+    font-size: 0.75rem;
+    margin-left: 0.5rem;
+    font-style: italic;
   }
   
   .field-input {
@@ -445,7 +620,7 @@
   .error-message {
     background: #fee2e2;
     border: 1px solid #fecaca;
-    color: #dc2626;
+    color: var(--error-color, #dc2626);
     padding: 12px;
     border-radius: 6px;
     margin-bottom: 16px;
@@ -455,7 +630,7 @@
   .success-message {
     background: #dcfce7;
     border: 1px solid #bbf7d0;
-    color: #16a34a;
+    color: var(--success-color, #16a34a);
     padding: 12px;
     border-radius: 6px;
     margin-bottom: 16px;

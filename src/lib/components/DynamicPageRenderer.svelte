@@ -15,6 +15,9 @@
   let loading = true;
   let error = '';
   
+  // Computed values for template
+  $: availablePagePaths = contractUI?.pages?.map((p: any) => p.path) || [];
+  
   // Reactive statements
   $: {
     if (contractUI?.pages && currentPath) {
@@ -37,6 +40,13 @@
       }
       
       console.log('🎯 Loading page:', pageConfig);
+      console.log('🔍 Contract UI structure:', {
+        hasPages: !!contractUI?.pages,
+        hasComponents: !!contractUI?.components,
+        hasEntities: !!contractUI?.entities,
+        entitiesCount: contractUI?.entities?.length || 0,
+        componentIds: contractUI?.components?.map((c: any) => c.id) || []
+      });
       
       // Load all components for this page
       await loadPageComponents();
@@ -75,18 +85,8 @@
           config: componentConfig
         };
         
-        // Add common props for all components
-        const componentProps = {
-          config: component.config,
-          metadata: component.config.metadata || {},
-          serviceSchema: serviceSchema,
-          entityName: component.config.entity || '',
-          entities: contractUI?.entities || [], // Pass entities for StatsGrid
-          // Legacy props for backward compatibility
-          columns: component.config.columns || [],
-          fields: component.config.fields || [],
-          actions: component.config.actions || []
-        };
+        // Create component-specific props based on component type and config
+        const componentProps = createComponentProps(component.config, componentConfig.type);
         
         componentMap.set(componentId, {
           component: component.component,
@@ -103,21 +103,15 @@
           config: { 
             id: componentId, 
             type: 'error_component',
-            metadata: { error: (err as any)?.message || 'Unknown error' } 
+            metadata: { error: err?.message || 'Unknown error' } 
           },
           props: {
             config: { 
               id: componentId, 
               type: 'error_component',
-              metadata: { error: (err as any)?.message || 'Unknown error' } 
+              metadata: { error: err?.message || 'Unknown error' } 
             },
-            metadata: { error: (err as any)?.message || 'Unknown error' },
-            serviceSchema: serviceSchema,
-            entityName: '',
-            entities: [],
-            columns: [],
-            fields: [],
-            actions: []
+            metadata: { error: err?.message || 'Unknown error' }
           }
         });
       }
@@ -128,6 +122,79 @@
     
     // Force Svelte to update
     await tick();
+  }
+  
+  // Create component-specific props to avoid prop warnings
+  function createComponentProps(config: any, componentType: string) {
+    // Base props that all components get
+    const baseProps = {
+      config: config,
+      metadata: config.metadata || {},
+      serviceSchema: serviceSchema
+    };
+    
+    // Component-specific props
+    switch (componentType) {
+      case 'service_info_card':
+        return {
+          ...baseProps
+        };
+        
+      case 'stats_grid':
+        return {
+          ...baseProps,
+          entities: contractUI?.entities || []
+        };
+        
+      case 'activity_feed':
+        return {
+          ...baseProps
+        };
+        
+      case 'workflow_status':
+      case 'workflow_list':
+      case 'workflow_triggers':
+        return {
+          ...baseProps
+        };
+        
+      case 'dynamic_form':
+        return {
+          ...baseProps,
+          entityName: config.entity || '',
+          fields: config.fields || [],
+          actions: config.actions || []
+        };
+        
+      case 'data_table':
+        return {
+          ...baseProps,
+          entityName: config.entity || '',
+          columns: config.columns || [],
+          actions: config.actions || []
+        };
+        
+      case 'filter_panel':
+        return {
+          ...baseProps,
+          entityName: config.entity || '',
+          fields: config.fields || []
+        };
+        
+      default:
+        // For unknown component types, provide all props
+        return {
+          ...baseProps,
+          serviceName: serviceName,
+          entityName: config.entity || '',
+          entities: contractUI?.entities || [],
+          theme: contractUI?.theme || {},
+          globalSettings: contractUI?.global_settings || {},
+          columns: config.columns || [],
+          fields: config.fields || [],
+          actions: config.actions || []
+        };
+    }
   }
   
   onMount(() => {
@@ -149,21 +216,15 @@
       <p>{error}</p>
       <details>
         <summary>Debug Info</summary>
-        <pre>Current Path: {currentPath}
-Service Schema: {serviceSchema}
-Available Pages: {JSON.stringify(contractUI?.pages?.map(p => p.path) || [], null, 2)}</pre>
+        <div class="debug-info">
+          <div><strong>Current Path:</strong> {currentPath}</div>
+          <div><strong>Service Schema:</strong> {serviceSchema}</div>
+          <div><strong>Available Pages:</strong> {JSON.stringify(availablePagePaths)}</div>
+        </div>
       </details>
     </div>
   {:else if pageConfig}
     <div class="page-content" data-layout={pageConfig.layout}>
-      <!-- Page Header -->
-      <header class="page-header">
-        <h1>{pageConfig.title || pageConfig.path}</h1>
-        {#if pageConfig.description}
-          <p class="page-description">{pageConfig.description}</p>
-        {/if}
-      </header>
-      
       <!-- Dynamic Components -->
       <main class="components-container">
         {#each pageConfig.components as componentId (componentId)}
@@ -177,14 +238,7 @@ Available Pages: {JSON.stringify(contractUI?.pages?.map(p => p.path) || [], null
             >
               <svelte:component
                 this={componentData.component}
-                config={componentData.config}
-                metadata={componentData.config.metadata || {}}
-                serviceSchema={serviceSchema}
-                entityName={componentData.config.entity || ''}
-                entities={contractUI?.entities || []}
-                columns={componentData.config.columns || []}
-                fields={componentData.config.fields || []}
-                actions={componentData.config.actions || []}
+                {...componentData.props}
               />
             </div>
           {:else}
@@ -206,7 +260,9 @@ Available Pages: {JSON.stringify(contractUI?.pages?.map(p => p.path) || [], null
 <style>
   .dynamic-page-container {
     min-height: 100%;
-    background: #f8fafc;
+    background: var(--bg-primary, #f8fafc);
+    display: flex;
+    flex-direction: column;
   }
   
   .loading-state {
@@ -221,8 +277,8 @@ Available Pages: {JSON.stringify(contractUI?.pages?.map(p => p.path) || [], null
   .loading-spinner {
     width: 32px;
     height: 32px;
-    border: 3px solid #e2e8f0;
-    border-top: 3px solid #3b82f6;
+    border: 3px solid var(--border-light, #e2e8f0);
+    border-top: 3px solid var(--primary-color, #3b82f6);
     border-radius: 50%;
     animation: spin 1s linear infinite;
   }
@@ -234,74 +290,62 @@ Available Pages: {JSON.stringify(contractUI?.pages?.map(p => p.path) || [], null
   
   .error-state {
     padding: 2rem;
-    background: #fef2f2;
-    border: 1px solid #fecaca;
-    border-radius: 8px;
-    color: #dc2626;
+    background: var(--error-color, #fef2f2);
+    border: 1px solid var(--error-color, #fecaca);
+    border-radius: var(--border-radius, 8px);
+    color: var(--error-color, #dc2626);
     margin: 1rem;
   }
   
   .no-config-state {
     padding: 2rem;
-    background: #fffbeb;
-    border: 1px solid #fde68a;
-    border-radius: 8px;
-    color: #d97706;
+    background: var(--warning-color, #fffbeb);
+    border: 1px solid var(--warning-color, #fde68a);
+    border-radius: var(--border-radius, 8px);
+    color: var(--warning-color, #d97706);
     margin: 1rem;
   }
   
   .page-content {
-    padding: 1rem;
-  }
-  
-  .page-header {
-    margin-bottom: 2rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid #e2e8f0;
-  }
-  
-  .page-header h1 {
-    font-size: 2rem;
-    font-weight: 700;
-    color: #1f2937;
-    margin: 0 0 0.5rem 0;
-  }
-  
-  .page-description {
-    color: #6b7280;
-    margin: 0;
-    font-size: 1.1rem;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    height: 100%;
   }
   
   .components-container {
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
+    gap: var(--spacing-lg, 24px);
+    flex: 1;
+    height: 100%;
+    overflow-y: auto;
   }
   
   /* Layout-specific styling */
   .page-content[data-layout="dashboard"] .components-container {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 1.5rem;
+    gap: var(--spacing-lg, 24px);
+    align-items: start;
   }
   
   .page-content[data-layout="entity_manager"] .components-container {
     display: flex;
     flex-direction: column;
-    gap: 2rem;
+    gap: var(--spacing-xl, 32px);
   }
   
   .component-wrapper {
-    background: white;
-    border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    background: var(--card-bg, white);
+    border-radius: var(--border-radius, 8px);
+    box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.1));
     overflow: hidden;
     transition: box-shadow 0.2s ease-in-out;
   }
   
   .component-wrapper:hover {
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-md, 0 4px 6px rgba(0, 0, 0, 0.1));
   }
   
   .component-wrapper[data-layout="full_width"] {
@@ -321,11 +365,11 @@ Available Pages: {JSON.stringify(contractUI?.pages?.map(p => p.path) || [], null
   
   .component-placeholder {
     padding: 2rem;
-    background: #f3f4f6;
-    border: 2px dashed #d1d5db;
-    border-radius: 8px;
+    background: var(--bg-secondary, #f3f4f6);
+    border: 2px dashed var(--border-color, #d1d5db);
+    border-radius: var(--border-radius, 8px);
     text-align: center;
-    color: #6b7280;
+    color: var(--text-muted, #6b7280);
   }
   
   /* Responsive design */
@@ -334,12 +378,8 @@ Available Pages: {JSON.stringify(contractUI?.pages?.map(p => p.path) || [], null
       grid-template-columns: 1fr;
     }
     
-    .page-header h1 {
-      font-size: 1.5rem;
-    }
-    
-    .page-content {
-      padding: 0.5rem;
+    .components-container {
+      gap: var(--spacing-md, 16px);
     }
   }
   
@@ -348,12 +388,20 @@ Available Pages: {JSON.stringify(contractUI?.pages?.map(p => p.path) || [], null
     margin-top: 1rem;
   }
   
-  details pre {
-    background: #f9fafb;
+  .debug-info {
+    background: var(--bg-secondary, #f9fafb);
     padding: 1rem;
-    border-radius: 4px;
-    border: 1px solid #e5e7eb;
-    overflow-x: auto;
+    border-radius: var(--border-radius, 4px);
+    border: 1px solid var(--border-color, #e5e7eb);
+    font-family: monospace;
     font-size: 0.875rem;
+  }
+  
+  .debug-info div {
+    margin-bottom: 0.5rem;
+  }
+  
+  .debug-info div:last-child {
+    margin-bottom: 0;
   }
 </style> 

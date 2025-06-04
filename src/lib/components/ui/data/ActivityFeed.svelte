@@ -65,6 +65,16 @@
     };
     return colorMap[type] || 'gray';
   }
+  
+  function handleActivityClick(activity: any) {
+    console.log('📋 Activity clicked:', activity);
+    // TODO: Navigate to specific record or show details
+  }
+  
+  function handleViewAll() {
+    console.log('📋 View All Activity clicked');
+    // TODO: Navigate to full activity log
+  }
 </script>
 
 <div class="activity-feed">
@@ -75,7 +85,7 @@
   
   <div class="activity-list">
     {#each activities as activity (activity.id)}
-      <div class="activity-item">
+      <div class="activity-item" on:click={() => handleActivityClick(activity)}>
         <div class="activity-icon" data-type={activity.type}>
           {activity.icon}
         </div>
@@ -109,7 +119,7 @@
   </div>
   
   <div class="feed-footer">
-    <button class="view-all-btn">
+    <button class="view-all-btn" on:click={handleViewAll}>
       View All Activity →
     </button>
   </div>
@@ -165,11 +175,14 @@
     border-radius: 6px;
     border: 1px solid #f3f4f6;
     transition: all 0.2s ease-in-out;
+    cursor: pointer;
   }
   
   .activity-item:hover {
     background: #f3f4f6;
     border-color: #e5e7eb;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
   }
   
   .activity-icon {

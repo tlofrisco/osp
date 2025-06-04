@@ -74,20 +74,81 @@
 
   async function submitForm() {
     saving = true;
+    error = '';
+    
     try {
       const coercedData = coerceForPost(formData, inputs);
+      console.log('🚀 Submitting form data:', coercedData);
+      
       const res = await fetch(`/api/services/${schema}/${entityName}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(coercedData)
       });
+      
       const result = await res.json();
       if (!res.ok) throw new Error(result.message || 'Submit failed');
+      
+      console.log('✅ Record created successfully:', result);
+      
+      // 🔥 Auto-update the list with new record
       items = [...items, result.data];
+      
+      // Clear form for next entry
       formData = {};
+      
+      // Show success message
+      const successMessage = document.createElement('div');
+      successMessage.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #16a34a;
+        color: white;
+        padding: 12px 20px;
+        border-radius: 6px;
+        z-index: 1000;
+        font-weight: 500;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      `;
+      successMessage.textContent = `✅ ${entityName.replace(/_/g, ' ')} created successfully`;
+      document.body.appendChild(successMessage);
+      
+      // Auto-remove success message after 3 seconds
+      setTimeout(() => {
+        if (successMessage.parentNode) {
+          successMessage.parentNode.removeChild(successMessage);
+        }
+      }, 3000);
+      
     } catch (err) {
+      console.error('❌ Form submission error:', err);
       error = err.message;
+      
+      // Show error message
+      const errorMessage = document.createElement('div');
+      errorMessage.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #dc2626;
+        color: white;
+        padding: 12px 20px;
+        border-radius: 6px;
+        z-index: 1000;
+        font-weight: 500;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      `;
+      errorMessage.textContent = `❌ Error: ${err.message}`;
+      document.body.appendChild(errorMessage);
+      
+      // Auto-remove error message after 5 seconds
+      setTimeout(() => {
+        if (errorMessage.parentNode) {
+          errorMessage.parentNode.removeChild(errorMessage);
+        }
+      }, 5000);
     } finally {
       saving = false;
     }

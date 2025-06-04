@@ -20,6 +20,10 @@
 	"dependencies": {
 		"@supabase/ssr": "^0.6.1",
 		"@supabase/supabase-js": "^2.45.4",
+		"@temporalio/activity": "^1.11.8",
+		"@temporalio/client": "^1.11.8",
+		"@temporalio/worker": "^1.11.8",
+		"@temporalio/workflow": "^1.11.8",
 		"dotenv": "^16.4.5",
 		"markdown-it": "^14.1.0",
 		"node-fetch": "^3.3.2",

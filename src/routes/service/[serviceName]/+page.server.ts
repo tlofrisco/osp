@@ -38,39 +38,33 @@ export async function load({ params }) {
     // If we reached here, the latest service metadata was found successfully!
     console.log(`[+page.server.ts load] Latest service metadata for '${serviceName}' (ID: ${serviceRecord.id}) found successfully.`);
 
-    // Fetch the associated manifest to get the contract UI
-    console.log(`[+page.server.ts load] Fetching manifest for service ID: ${serviceRecord.id}`);
-    const { data: manifestRecord, error: manifestError } = await supabaseAdmin
-        .schema('osp_metadata')
-        .from('service_manifests')
-        .select('manifest_data')
-        .eq('service_id', serviceRecord.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-    if (manifestError) {
-        console.warn(`[+page.server.ts load] Error fetching manifest for service '${serviceName}':`, manifestError);
-    } else if (manifestRecord) {
-        console.log(`[+page.server.ts load] Manifest found for service '${serviceName}'`);
-        // Merge the contract UI from the manifest into the service record
-        if (manifestRecord.manifest_data?.contract_ui) {
-            serviceRecord.contract_ui = manifestRecord.manifest_data.contract_ui;
-            console.log(`[+page.server.ts load] Contract UI loaded from manifest`);
-        }
+    // Fetch the associated manifest from the service metadata
+    console.log(`[+page.server.ts load] Service metadata loaded for '${serviceName}'`);
+    
+    // Extract contract UI from the service metadata (manifest)
+    if (serviceRecord.metadata?.contract_ui) {
+        serviceRecord.contract_ui = serviceRecord.metadata.contract_ui;
+        console.log(`[+page.server.ts load] Contract UI loaded from service metadata`);
     } else {
-        console.log(`[+page.server.ts load] No manifest found for service '${serviceName}' - will show fallback UI`);
+        console.log(`[+page.server.ts load] No contract UI found in service metadata for '${serviceName}' - will show fallback UI`);
     }
 
-    // Optional: Try to pull tables for that schema (enrichment)
+    // Optional: Try to get table information (simplified approach)
     console.log(`[+page.server.ts load] Fetching table list for schema: ${serviceName}`);
-    const { data: tables, error: tableError } = await supabaseAdmin
-        .rpc('get_schema_tables', { schema_name: serviceName });
-
-    if (tableError) {
-        console.warn(`[+page.server.ts load] Error fetching table list for schema '${serviceName}':`, tableError);
-    } else {
-        console.log(`[+page.server.ts load] Tables found for schema '${serviceName}':`, tables);
+    let tables = [];
+    try {
+        const tableListSql = `SELECT table_name FROM information_schema.tables WHERE table_schema = '${serviceName}'`;
+        const { data: tableData, error: tableError } = await supabaseAdmin
+            .rpc('execute_sql', { sql_text: tableListSql });
+        
+        if (tableError) {
+            console.warn(`[+page.server.ts load] Error fetching table list for schema '${serviceName}':`, tableError);
+        } else {
+            tables = tableData || [];
+            console.log(`[+page.server.ts load] Tables found for schema '${serviceName}':`, tables);
+        }
+    } catch (err) {
+        console.warn(`[+page.server.ts load] Failed to fetch tables for schema '${serviceName}':`, err);
     }
 
     // In src/routes/service/[serviceName]/+page.server.ts near the end
