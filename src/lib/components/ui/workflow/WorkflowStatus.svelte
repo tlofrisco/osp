@@ -1,5 +1,7 @@
 <!-- 🔄 Workflow Status Component -->
 <script lang="ts">
+  import { onMount } from 'svelte';
+  
   export let config: any;
   export let metadata: any = {};
   export let serviceSchema: string = '';
@@ -12,37 +14,33 @@
     limit = 5
   } = metadata;
 
-  // Mock data for now - will be replaced with real Temporal data
-  const mockWorkflows = [
-    {
-      id: 'inventory_creation_001',
-      name: 'Inventory Creation Process',
-      status: 'running',
-      started: '2024-01-15T10:30:00Z',
-      progress: 60
-    },
-    {
-      id: 'order_fulfillment_002', 
-      name: 'Order Fulfillment Process',
-      status: 'completed',
-      started: '2024-01-15T09:15:00Z',
-      completed: '2024-01-15T09:45:00Z'
-    },
-    {
-      id: 'data_consistency_003',
-      name: 'Data Consistency Check',
-      status: 'scheduled',
-      scheduled: '2024-01-16T02:00:00Z'
-    }
-  ];
-
-  // Mock workflow data for now
-  const workflowStats = {
-    total: 11,
-    active: 3,
-    completed_today: 15,
-    avg_duration: '2.3min'
+  // Get actual workflow count from service metadata
+  let workflowStats = {
+    total: 0,
+    active: 0,
+    completed_today: 0,
+    avg_duration: '0min'
   };
+  
+  // Recent workflow executions (will be populated from database)
+  let recentWorkflows = [];
+  
+  onMount(async () => {
+    // Fetch service metadata to get actual workflow count
+    try {
+      const response = await fetch(`/api/services/${serviceSchema}/metadata`);
+      if (response.ok) {
+        const data = await response.json();
+        const workflows = data.metadata?.workflows || [];
+        workflowStats.total = workflows.length;
+        
+        // TODO: Fetch actual execution stats from workflow_executions table
+        // For now, just show the total count
+      }
+    } catch (error) {
+      console.error('Failed to fetch workflow stats:', error);
+    }
+  });
 
   function getStatusColor(status: string): string {
     switch (status) {
@@ -86,6 +84,20 @@
         <span class="status-label">Avg Duration</span>
       </div>
     </div>
+    
+    {#if recentWorkflows.length > 0}
+      <div class="recent-workflows">
+        <h5>Recent Executions</h5>
+        {#each recentWorkflows as workflow}
+          <div class="workflow-item">
+            <span class="workflow-name">{workflow.name}</span>
+            <span class="workflow-status" style="color: {getStatusColor(workflow.status)}">
+              {workflow.status}
+            </span>
+          </div>
+        {/each}
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -141,5 +153,41 @@
     color: #6b7280;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  }
+  
+  .recent-workflows {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #e5e7eb;
+  }
+  
+  .recent-workflows h5 {
+    margin: 0 0 1rem 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #374151;
+  }
+  
+  .workflow-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  
+  .workflow-item:last-child {
+    border-bottom: none;
+  }
+  
+  .workflow-name {
+    font-size: 0.875rem;
+    color: #374151;
+  }
+  
+  .workflow-status {
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
   }
 </style> 

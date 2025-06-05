@@ -251,6 +251,77 @@ async function createTableFromModel(blendedModel: any, serviceDraft: any, servic
   return tableColumns;
 }
 
+/**
+ * Validates that all three legs of the stool are coherent
+ */
+function validateServiceCoherence(model: any): { valid: boolean; issues: string[] } {
+  const issues: string[] = [];
+  
+  // Track usage of schema fields
+  const fieldUsage = new Map<string, { inWorkflow: boolean; inUI: boolean }>();
+  
+  // Initialize field tracking
+  model.entities?.forEach((entity: any) => {
+    Object.keys(entity.attributes || {}).forEach(field => {
+      fieldUsage.set(`${entity.name}.${field}`, { inWorkflow: false, inUI: false });
+    });
+  });
+  
+  // Check workflow field usage
+  model.workflows?.forEach((workflow: any) => {
+    workflow.steps?.forEach((step: any) => {
+      // Mark fields used in workflows
+      step.uses_fields?.forEach((field: string) => {
+        const usage = fieldUsage.get(field);
+        if (usage) usage.inWorkflow = true;
+      });
+      step.updates_fields?.forEach((field: string) => {
+        const usage = fieldUsage.get(field);
+        if (usage) usage.inWorkflow = true;
+      });
+    });
+  });
+  
+  // Check UI field usage
+  model.ui_components?.forEach((component: any) => {
+    component.fields?.forEach((field: string) => {
+      const fullField = `${component.entity}.${field}`;
+      const usage = fieldUsage.get(fullField);
+      if (usage) usage.inUI = true;
+    });
+  });
+  
+  // Find orphan fields
+  fieldUsage.forEach((usage, field) => {
+    if (!usage.inWorkflow && !usage.inUI) {
+      issues.push(`Orphan field: ${field} not used in any workflow or UI`);
+    }
+  });
+  
+  // Check workflows have UI triggers
+  model.workflows?.forEach((workflow: any) => {
+    const hasTrigger = model.ui_components?.some((ui: any) => 
+      ui.triggers_workflow === workflow.id
+    );
+    if (!hasTrigger) {
+      issues.push(`Workflow '${workflow.name}' has no UI trigger`);
+    }
+  });
+  
+  // Check UI components reference valid entities
+  model.ui_components?.forEach((ui: any) => {
+    const entityExists = model.entities?.some((e: any) => e.name === ui.entity);
+    if (!entityExists) {
+      issues.push(`UI component '${ui.id}' references non-existent entity '${ui.entity}'`);
+    }
+  });
+  
+  return {
+    valid: issues.length === 0,
+    issues
+  };
+}
+
 export async function POST({ request, locals, params }) {
   console.log('🟢 POST /api/osp/service reached!');
   const supabase = locals.supabase;
@@ -295,7 +366,7 @@ export async function POST({ request, locals, params }) {
   console.log(`📦 Using schema name: ${serviceSchema}`);
 
   // Generate blended model
-  let blendedModel = { service_type: 'Unknown', entities: [] };
+  let blendedModel = { service_type: 'Unknown', entities: [], workflows: [], ui_components: [] };
   let spec = '';
   let contractUI: any = null;
   try {
@@ -304,51 +375,116 @@ export async function POST({ request, locals, params }) {
       timeout: 60000,
       maxRetries: 3
     });
-    const blendResponse = await openai.chat.completions.create({
+    
+    // NEW: Generate coherent service definition with workflows and UI
+    const coherentResponse = await openai.chat.completions.create({
       model: 'gpt-4o',
       response_format: { type: "json_object" },
       messages: [
         {
           role: 'system',
-          content: `You are an expert in blending service models using TMForumSID and ARTS frameworks. Given a problem statement, requirements, and selected frameworks, create a blended model with entities, their attributes, and relationships.
-          
-Rules:
-- Each entity must include a "provider" attribute of type "text" ONLY IF a relationship named "provider" does NOT already exist in that entity.
-- If a "provider" relationship OR a "provider" attribute already exists, DO NOT add another.
-- NEVER allow an attribute and a relationship to have the same name inside an entity.
+          content: `You are a service architect who understands the THREE-LEGGED STOOL principle:
+Schema ↔ Workflows ↔ UI must work together seamlessly.
 
-Output Structure:
-- Return ONLY a valid JSON object with a "service_type" string and an "entities" array.
-- Each entity must have:
-  - a "name" (string)
-  - an "attributes" object (key-value pairs: attribute_name -> type)
-  - a "relationships" object (key-value pairs: relationship_name -> { "type": "relationshipType", "target": "EntityName" })
+CRITICAL RULES:
+1. Every schema field must be used by at least one workflow and displayed in at least one UI
+2. Every workflow must have the data it needs and UI to trigger/display it
+3. Every UI component must have data backing and workflow integration
+4. Include workflow state tracking fields in entities (status, workflow_state, etc.)
+5. Generate AT LEAST 3-5 workflows for each service to cover common operations
+6. For restaurant systems, include workflows for: reservations, table management, order processing, kitchen coordination
+7. For inventory systems, include workflows for: stock updates, reordering, receiving, auditing
+8. Include both manual triggers (UI buttons) and automated triggers (entity changes)
 
-Field Naming Rules:
-- All attribute and relationship names must be:
-  - lowercase
-  - use underscores
-  - valid PostgreSQL identifiers (not reserved words or purely numeric)
+Generate a COMPREHENSIVE service where all three legs support each other. Start by identifying the core business processes, then design the schema to support those processes, and finally create UI components that enable and display the workflows.
 
-Important:
-- No duplicate attribute names within an entity.
-- No attribute and relationship sharing the same name in the same entity.
-- No extra explanations, markdown, or text outside the JSON object.`
+Return JSON with this exact structure:
+{
+  "service_type": "category",
+  "entities": [
+    {
+      "name": "EntityName",
+      "attributes": {
+        "field_name": "type",
+        "status": "text",
+        "workflow_state": "text",
+        "created_at": "timestamptz",
+        "updated_at": "timestamptz"
+      },
+      "relationships": {
+        "rel_name": { "type": "one_to_many", "target": "OtherEntity" }
+      }
+    }
+  ],
+  "workflows": [
+    {
+      "id": "workflow_id",
+      "name": "Human Readable Workflow Name",
+      "description": "What this workflow accomplishes",
+      "trigger": {
+        "type": "ui_action|form_submit|entity_change",
+        "source": "button_id or entity.field"
+      },
+      "steps": [
+        {
+          "id": "step1",
+          "name": "Step Name",
+          "type": "create_entity|update_entity|validate|notify|calculate|check_availability",
+          "target_entity": "EntityName",
+          "uses_fields": ["Entity.field1", "Entity.field2"],
+          "updates_fields": ["Entity.status", "Entity.workflow_state"],
+          "conditions": {},
+          "outputs": {}
+        }
+      ],
+      "ui_components": ["trigger_button", "status_display"]
+    }
+  ],
+  "ui_components": [
+    {
+      "id": "component_id",
+      "type": "form|list|button|status_display|calendar|chart",
+      "entity": "EntityName",
+      "fields": ["field1", "field2"],
+      "triggers_workflow": "workflow_id",
+      "layout": "default|calendar|grid"
+    }
+  ]
+}`
         },
         {
           role: 'user',
-          content: `Problem: ${serviceDraft.problem}
+          content: `Generate a COMPREHENSIVE service definition for:
+Problem: ${serviceDraft.problem}
 Requirements: ${serviceDraft.requirements}
-Frameworks: ${serviceDraft.frameworks.join(', ')}`
+Frameworks: ${serviceDraft.frameworks.join(', ') || 'Generic Business Process'}
+
+Remember: 
+- Create AT LEAST 3-5 workflows that cover the main business processes
+- Include calendar views for scheduling/availability if relevant
+- All three legs must support each other
+- Design workflows that actually solve the business problem`
         }
       ],
       temperature: 0.7,
-      max_tokens: 1500
+      max_tokens: 8000  // Increased from 3000 to allow for more comprehensive generation
     });
 
-    const rawBlend = blendResponse.choices[0].message.content;
-    if (!rawBlend) throw new Error("Empty model response.");
-    blendedModel = JSON.parse(rawBlend);
+    const coherentService = JSON.parse(coherentResponse.choices[0].message.content || '{}');
+    
+    // Extract blended model from coherent service
+    blendedModel = {
+      service_type: coherentService.service_type,
+      entities: coherentService.entities || [],
+      workflows: coherentService.workflows || [],
+      ui_components: coherentService.ui_components || []
+    };
+    
+    // Validate coherence
+    const coherenceCheck = validateServiceCoherence(blendedModel);
+    if (!coherenceCheck.valid) {
+      console.warn('⚠️ Coherence issues detected:', coherenceCheck.issues);
+    }
 
     // ✨ Fix potential conflicts BEFORE validating
     blendedModel = sanitizeBlendedModel(blendedModel);
@@ -358,6 +494,9 @@ Frameworks: ${serviceDraft.frameworks.join(', ')}`
 
     // ✅ Generate contract UI from the validated blended model
     contractUI = buildContractUIFromModel(blendedModel, serviceSchema);
+    
+    // Add workflows to contractUI
+    contractUI.workflows = blendedModel.workflows;
 
   } catch (e: unknown) {
     const errorMessage = e instanceof Error ? e.message : 'Unknown error occurred';

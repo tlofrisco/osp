@@ -43,89 +43,49 @@ export interface WorkflowTrigger {
 
 export interface WorkflowStep {
   id: string;
-  type: WorkflowStepType | 'timer';
-  name?: string;
-  description?: string;
-  optional?: boolean;
-  timeout?: number;
-  retryPolicy?: {
-    maximumAttempts?: number;
-    backoffCoefficient?: number;
-  };
-  config?: any;
-  
-  // Activity configuration
-  activity?: {
-    type: string;           // 'update_entity', 'send_email', 'call_api', etc.
-    params: Record<string, any>;
-    timeout_seconds?: number;
-    retry_policy?: {
-      max_attempts: number;
-      backoff_coefficient: number;
-      max_interval_seconds: number;
-    };
-  };
-  
-  // Condition configuration
-  condition?: {
-    expression: string;     // "${order.amount} > 100"
-    true_steps: string[];   // Step IDs to execute if true
-    false_steps?: string[]; // Step IDs to execute if false
-  };
-  
-  // Wait configuration
-  wait?: {
-    signal_name?: string;   // Signal to wait for
-    timeout_seconds?: number;
-    timer_duration?: string; // "PT1H" for 1 hour
-  };
-  
-  // Human task configuration
-  human_task?: {
-    assignee_role?: string; // Role that can complete task
-    assignee_user?: string; // Specific user
-    form_schema?: any;      // Form for human input
-    timeout_seconds?: number;
-  };
-  
-  // Parallel execution
-  parallel_steps?: string[]; // Step IDs to execute in parallel
-  
-  // Loop configuration
-  loop?: {
-    collection: string;     // Variable containing collection
-    item_variable: string;  // Variable name for current item
-    steps: string[];        // Step IDs to execute for each item
-    max_iterations?: number;
-  };
-  
-  // Error handling
-  on_error?: 'retry' | 'fail' | 'continue' | 'compensate';
-  compensation_steps?: string[]; // Steps to run on compensation
-  
-  // Conditional execution
-  when?: string;          // Condition for step execution
-  
-  // Next steps (for linear flows)
-  next?: string | string[];
+  name: string;
+  type: 'activity' | 'create_entity' | 'update_entity' | 'validate' | 'notify' | 'calculate' | 'check_availability';
+  uses_fields?: string[];
+  updates_fields?: string[];
+  target_entity?: string;
+  field_values?: Record<string, any>;
+  validation_rules?: ValidationRule[];
+  notification_type?: string;
+  calculation_type?: 'sum' | 'multiply';
+  calculation_fields?: string[];
+  availability_filters?: Record<string, any>;
+}
+
+export interface ValidationRule {
+  field: string;
+  type: 'required' | 'min_value' | 'max_value' | 'pattern';
+  value?: any;
+  message?: string;
 }
 
 export interface WorkflowDefinition {
   id: string;
   name: string;
-  description?: string;
-  triggers: WorkflowTrigger[];
+  description: string;
+  trigger: WorkflowTrigger;
   steps: WorkflowStep[];
-  industryTraceability?: {
-    framework: string;
-    process: string;
-    standard: string;
+  ui_components: string[];
+  timeout_seconds?: number;
+  retry_policy?: {
+    max_attempts: number;
+    backoff_coefficient: number;
   };
-  timeout?: number;
-  retryPolicy?: {
-    maximumAttempts?: number;
-    backoffCoefficient?: number;
-  };
+}
+
+export interface WorkflowExecution {
+  id: string;
+  workflow_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  input: Record<string, any>;
+  output?: Record<string, any>;
+  error?: string;
+  started_at: string;
+  completed_at?: string;
 }
 
 export interface WorkflowManifest {

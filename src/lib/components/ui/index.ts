@@ -36,6 +36,10 @@ const UI_COMPONENTS: Record<string, () => Promise<any>> = {
   'workflow_status_grid': () => import('./workflow/WorkflowStatusGrid.svelte'),
   'workflow_triggers': () => import('./workflow/WorkflowTriggers.svelte'),
   
+  // Calendar Components
+  'calendar': () => import('./calendar/CalendarView.svelte'),
+  'calendar_view': () => import('./calendar/CalendarView.svelte'),
+  
   // Fallback Components
   'unknown_component': () => import('./fallback/UnknownComponent.svelte'),
   'error_component': () => import('./fallback/ErrorComponent.svelte')
@@ -121,6 +125,8 @@ export function isComponentAvailable(componentType: string): boolean {
  */
 export const COMPONENT_CATEGORIES = {
   form: ['dynamic_form'],
-  data: ['info_card', 'stats_grid', 'activity_feed'],
+  data: ['info_card', 'stats_grid', 'activity_feed', 'data_table'],
+  workflow: ['workflow_status', 'workflow_list', 'workflow_status_grid', 'workflow_triggers'],
+  calendar: ['calendar', 'calendar_view'],
   fallback: ['error_component', 'unknown_component']
 } as const; 
