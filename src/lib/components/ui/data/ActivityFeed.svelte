@@ -3,6 +3,10 @@
   export let metadata: any = {};
   export let serviceSchema: string = '';
   
+  // Additional props for compatibility (to avoid warnings)
+  export let serviceName: string = '';
+  export let currentRole: string = 'waitress';
+  
   // Mock activity data - replace with real API call
   const activities = [
     {

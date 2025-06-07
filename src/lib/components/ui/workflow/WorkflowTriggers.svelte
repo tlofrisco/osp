@@ -7,6 +7,9 @@
   export let serviceSchema: string = '';
   export let serviceName: string = '';
   
+  // Additional props for compatibility (to avoid warnings)
+  export let currentRole: string = 'waitress';
+  
   // Workflows will be loaded from service metadata
   let manualWorkflows = [];
   let allWorkflows = [];

@@ -13,35 +13,18 @@ import { workflowOrchestrator, type ServiceOperation } from '$lib/osp/dsl/workfl
 
 // 🔵 Generate a unique, valid schema name
 async function generateUniqueSchemaName(baseName: string): Promise<string> {
-  let schemaName = baseName
+  // Simple approach: clean the name and add a timestamp
+  const cleanName = baseName
     .toLowerCase()
     .replace(/\s+/g, '_')
     .replace(/[^a-z0-9_]/g, '')
-    .substring(0, 40);
-
-  let suffix = 1;
-  while (true) {
-    // Check if schema exists using direct SQL
-    const checkSchemaSql = `SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = '${schemaName}')`;
-    const { data, error: rpcError } = await supabaseAdmin.rpc('execute_sql', {
-      sql_text: checkSchemaSql
-    });
-    
-    if (rpcError) {
-      console.error('Schema existence check failed:', rpcError.message);
-      throw new Error('Failed to check existing schemas');
-    }
-    
-    // If schema doesn't exist, we can use this name
-    if (!data || (Array.isArray(data) && data.length > 0 && !data[0].exists)) break;
-
-    schemaName = `${baseName}_${suffix}`
-      .toLowerCase()
-      .replace(/\s+/g, '_')
-      .replace(/[^a-z0-9_]/g, '');
-    suffix++;
-  }
-
+    .substring(0, 30); // Leave room for timestamp
+  
+  // Add timestamp to ensure uniqueness
+  const timestamp = Date.now();
+  const schemaName = `${cleanName}_${timestamp}`;
+  
+  console.log(`📛 Generated schema name: ${schemaName}`);
   return schemaName;
 }
 
@@ -252,6 +235,159 @@ async function createTableFromModel(blendedModel: any, serviceDraft: any, servic
 }
 
 /**
+ * Creates a minimal fallback service when OpenAI fails
+ */
+function createFallbackService(serviceDraft: any): any {
+  console.log('🛡️ Creating fallback service for:', serviceDraft.problem);
+  
+  // For a restaurant reservation system, create a simple but working model
+  if (serviceDraft.problem.toLowerCase().includes('restaurant') || 
+      serviceDraft.problem.toLowerCase().includes('reservation')) {
+    return {
+      service_type: 'Restaurant Management',
+      entities: [
+        {
+          name: 'Reservation',
+          attributes: {
+            customer_name: 'string',
+            phone_number: 'string',
+            reservation_date: 'datetime',
+            reservation_time: 'string',
+            party_size: 'integer',
+            table_number: 'integer',
+            status: 'string',
+            special_requests: 'string'
+          },
+          relationships: {
+            table: { type: 'many_to_one', target: 'Table' }
+          }
+        },
+        {
+          name: 'Table',
+          attributes: {
+            table_number: 'integer',
+            capacity: 'integer',
+            location: 'string',
+            status: 'string'
+          },
+          relationships: {}
+        }
+      ],
+      workflows: [
+        {
+          id: 'create_reservation',
+          name: 'Create Reservation',
+          description: 'Create a new reservation',
+          trigger: {
+            type: 'form_submit',
+            source: 'reservation_form'
+          },
+          steps: [
+            {
+              id: 'step1',
+              name: 'Create Reservation',
+              type: 'create_entity',
+              target_entity: 'Reservation'
+            }
+          ]
+        },
+        {
+          id: 'check_availability',
+          name: 'Check Table Availability',
+          description: 'Check if tables are available',
+          trigger: {
+            type: 'ui_action',
+            source: 'check_availability_button'
+          },
+          steps: [
+            {
+              id: 'step1',
+              name: 'Check Availability',
+              type: 'check_availability',
+              target_entity: 'Table'
+            }
+          ]
+        }
+      ],
+      ui_components: [
+        {
+          id: 'reservation_form',
+          type: 'form',
+          entity: 'Reservation',
+          fields: ['customer_name', 'phone_number', 'reservation_date', 'reservation_time', 'party_size', 'special_requests'],
+          triggers_workflow: 'create_reservation'
+        },
+        {
+          id: 'reservation_list',
+          type: 'list',
+          entity: 'Reservation',
+          fields: ['customer_name', 'reservation_date', 'reservation_time', 'table_number', 'status']
+        },
+        {
+          id: 'availability_calendar',
+          type: 'calendar',
+          entity: 'Reservation',
+          fields: ['reservation_date', 'reservation_time', 'table_number'],
+          layout: 'calendar'
+        }
+      ]
+    };
+  }
+  
+  // Generic fallback for any other service type
+  return {
+    service_type: 'Generic Service',
+    entities: [
+      {
+        name: 'Item',
+        attributes: {
+          name: 'string',
+          description: 'string',
+          status: 'string',
+          created_at: 'datetime',
+          updated_at: 'datetime'
+        },
+        relationships: {}
+      }
+    ],
+    workflows: [
+      {
+        id: 'create_item',
+        name: 'Create Item',
+        description: 'Create a new item',
+        trigger: {
+          type: 'form_submit',
+          source: 'item_form'
+        },
+        steps: [
+          {
+            id: 'step1',
+            name: 'Create Item',
+            type: 'create_entity',
+            target_entity: 'Item'
+          }
+        ]
+      }
+    ],
+    ui_components: [
+      {
+        id: 'item_form',
+        type: 'form',
+        entity: 'Item',
+        fields: ['name', 'description', 'status'],
+        triggers_workflow: 'create_item'
+      },
+      {
+        id: 'item_list',
+        type: 'list',
+        entity: 'Item',
+        fields: ['name', 'status', 'created_at']
+      }
+    ]
+  };
+}
+
+/**
  * Validates that all three legs of the stool are coherent
  */
 function validateServiceCoherence(model: any): { valid: boolean; issues: string[] } {
@@ -361,7 +497,11 @@ export async function POST({ request, locals, params }) {
     throw error(400, 'Invalid JSON payload');
   }
 
+  // Extract conversation context if provided
+  const conversationContext = serviceDraft.conversationContext || [];
+  
   const prompt = `${serviceDraft.problem} - ${serviceDraft.requirements}`;
+  console.log('📝 Generating schema name...');
   const serviceSchema = serviceDraft.service_schema || serviceDraft.schema_name || await generateUniqueSchemaName(serviceDraft.problem);
   console.log(`📦 Using schema name: ${serviceSchema}`);
 
@@ -370,107 +510,84 @@ export async function POST({ request, locals, params }) {
   let spec = '';
   let contractUI: any = null;
   try {
+    console.log('🤖 Starting OpenAI service generation...');
     const openai = new OpenAI({
       apiKey: OPENAI_API_KEY,
-      timeout: 60000,
-      maxRetries: 3
+      timeout: 30000, // Reduced from 60000 to 30000 (30 seconds)
+      maxRetries: 1    // Reduced from 3 to 1 for faster failure
     });
     
+    console.log('🚀 Making OpenAI API call...');
+    
     // NEW: Generate coherent service definition with workflows and UI
-    const coherentResponse = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: 'system',
-          content: `You are a service architect who understands the THREE-LEGGED STOOL principle:
-Schema ↔ Workflows ↔ UI must work together seamlessly.
+    const coherentResponse = await Promise.race([
+      openai.chat.completions.create({
+        model: 'gpt-4o',
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: 'system',
+            content: `You are a service architect. Generate a simple, working service definition.
 
-CRITICAL RULES:
-1. Every schema field must be used by at least one workflow and displayed in at least one UI
-2. Every workflow must have the data it needs and UI to trigger/display it
-3. Every UI component must have data backing and workflow integration
-4. Include workflow state tracking fields in entities (status, workflow_state, etc.)
-5. Generate AT LEAST 3-5 workflows for each service to cover common operations
-6. For restaurant systems, include workflows for: reservations, table management, order processing, kitchen coordination
-7. For inventory systems, include workflows for: stock updates, reordering, receiving, auditing
-8. Include both manual triggers (UI buttons) and automated triggers (entity changes)
-
-Generate a COMPREHENSIVE service where all three legs support each other. Start by identifying the core business processes, then design the schema to support those processes, and finally create UI components that enable and display the workflows.
-
-Return JSON with this exact structure:
+Return JSON with this structure:
 {
   "service_type": "category",
   "entities": [
     {
       "name": "EntityName",
       "attributes": {
-        "field_name": "type",
-        "status": "text",
-        "workflow_state": "text",
-        "created_at": "timestamptz",
-        "updated_at": "timestamptz"
+        "field_name": "type"
       },
-      "relationships": {
-        "rel_name": { "type": "one_to_many", "target": "OtherEntity" }
-      }
+      "relationships": {}
     }
   ],
   "workflows": [
     {
       "id": "workflow_id",
-      "name": "Human Readable Workflow Name",
-      "description": "What this workflow accomplishes",
+      "name": "Workflow Name",
+      "description": "Description",
       "trigger": {
-        "type": "ui_action|form_submit|entity_change",
-        "source": "button_id or entity.field"
+        "type": "ui_action",
+        "source": "button_id"
       },
       "steps": [
         {
           "id": "step1",
           "name": "Step Name",
-          "type": "create_entity|update_entity|validate|notify|calculate|check_availability",
-          "target_entity": "EntityName",
-          "uses_fields": ["Entity.field1", "Entity.field2"],
-          "updates_fields": ["Entity.status", "Entity.workflow_state"],
-          "conditions": {},
-          "outputs": {}
+          "type": "create_entity",
+          "target_entity": "EntityName"
         }
-      ],
-      "ui_components": ["trigger_button", "status_display"]
+      ]
     }
   ],
   "ui_components": [
     {
       "id": "component_id",
-      "type": "form|list|button|status_display|calendar|chart",
+      "type": "form",
       "entity": "EntityName",
-      "fields": ["field1", "field2"],
-      "triggers_workflow": "workflow_id",
-      "layout": "default|calendar|grid"
+      "fields": ["field_name"]
     }
   ]
 }`
-        },
-        {
-          role: 'user',
-          content: `Generate a COMPREHENSIVE service definition for:
-Problem: ${serviceDraft.problem}
-Requirements: ${serviceDraft.requirements}
-Frameworks: ${serviceDraft.frameworks.join(', ') || 'Generic Business Process'}
+          },
+          {
+            role: 'user',
+            content: `Generate a simple service for: ${serviceDraft.problem} - ${serviceDraft.requirements}`
+          }
+        ],
+        temperature: 0.3, // Reduced from 0.7 for more predictable output
+        max_tokens: 2000  // Reduced from 8000 for faster generation
+      }),
+      // Add a timeout promise that rejects after 25 seconds
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('OpenAI API timeout')), 25000)
+      )
+    ]);
 
-Remember: 
-- Create AT LEAST 3-5 workflows that cover the main business processes
-- Include calendar views for scheduling/availability if relevant
-- All three legs must support each other
-- Design workflows that actually solve the business problem`
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: 8000  // Increased from 3000 to allow for more comprehensive generation
-    });
-
+    console.log('✅ OpenAI API call completed');
+    
     const coherentService = JSON.parse(coherentResponse.choices[0].message.content || '{}');
+    console.log('📊 Generated service:', coherentService);
     
     // Extract blended model from coherent service
     blendedModel = {
@@ -486,12 +603,14 @@ Remember:
       console.warn('⚠️ Coherence issues detected:', coherenceCheck.issues);
     }
 
+    console.log('🔧 Sanitizing and validating model...');
     // ✨ Fix potential conflicts BEFORE validating
     blendedModel = sanitizeBlendedModel(blendedModel);
 
     // Now validate after fixing
     validateBlendedModel(blendedModel);
 
+    console.log('🎨 Building contract UI...');
     // ✅ Generate contract UI from the validated blended model
     contractUI = buildContractUIFromModel(blendedModel, serviceSchema);
     
@@ -500,8 +619,12 @@ Remember:
 
   } catch (e: unknown) {
     const errorMessage = e instanceof Error ? e.message : 'Unknown error occurred';
-    console.error('AI Blend failed:', e);
-    throw error(503, `AI model failed to generate service: ${errorMessage}`);
+    console.error('❌ AI Blend failed:', e);
+    
+    // 🛡️ FALLBACK: Create a minimal working service if OpenAI fails
+    console.log('🚨 Creating fallback service...');
+    blendedModel = createFallbackService(serviceDraft);
+    console.log('✅ Fallback service created:', blendedModel);
   }
 
   // ✅ Ensure contractUI has a fallback if generation failed

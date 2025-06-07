@@ -1,9 +1,12 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
   import DynamicPageRenderer from '$lib/components/DynamicPageRenderer.svelte';
   import ThemePicker from '$lib/components/ui/ThemePicker.svelte';
   import { themeService } from '$lib/services/themeService';
+  import ServiceRegenerator from '$lib/components/ServiceRegenerator.svelte';
+  import SchemaEvolution from '$lib/components/SchemaEvolution.svelte';
+  // Using emojis instead of lucide-svelte icons for consistency
   
   /** @type {import('./$types').PageData} */
   export let data;
@@ -58,6 +61,21 @@
   let availablePages: any[] = [];
   let navigationItems: any[] = [];
   
+  // Regeneration UI state
+  let showRegenerator = false;
+  let showEvolution = false;
+  
+  // Role testing - simple stub for workflow testing
+  let currentRole = 'waitress'; // 'waitress' | 'manager'
+  let showRoleSelector = true;
+  
+  // Workflow testing status
+  let workflowExecutions = [];
+  let showWorkflowStatus = true;
+  
+  // Auto-refresh workflow executions every 10 seconds during testing
+  let refreshInterval: number;
+  
   // Initialize from contract UI
   $: {
     if (contractUI?.pages) {
@@ -94,6 +112,33 @@
         console.error('Failed to initialize theme system:', error);
       }
     }
+    
+    // Load recent workflow executions for testing
+    await loadRecentWorkflowExecutions();
+  });
+  
+  async function loadRecentWorkflowExecutions() {
+    if (!serviceSchema) return;
+    
+    try {
+      const response = await fetch(`/api/workflows/executions?service=${serviceSchema}&limit=5`);
+      if (response.ok) {
+        const data = await response.json();
+        workflowExecutions = data.executions || [];
+      }
+    } catch (error) {
+      console.error('Failed to load workflow executions:', error);
+    }
+  }
+  
+  $: if (showWorkflowStatus && serviceSchema) {
+    if (refreshInterval) clearInterval(refreshInterval);
+    refreshInterval = setInterval(loadRecentWorkflowExecutions, 10000);
+  }
+  
+  // Cleanup interval on component destroy
+  onDestroy(() => {
+    if (refreshInterval) clearInterval(refreshInterval);
   });
 
   function getDisplayIcon(icon: string, label: string): string {
@@ -178,9 +223,57 @@
         {sidebarOpen ? '☰' : '☰'}
       </button>
       <h1 class="service-title">{displayServiceName}</h1>
+      
+      <!-- Role Selector for Testing -->
+      {#if showRoleSelector}
+        <div class="role-selector">
+          <label for="role-select">Role:</label>
+          <select id="role-select" bind:value={currentRole} class="role-select">
+            <option value="waitress">👩‍💼 Waitress</option>
+            <option value="manager">👨‍💼 Manager</option>
+          </select>
+        </div>
+      {/if}
     </div>
     
     <div class="header-right">
+      <!-- Workflow Status for Testing -->
+      {#if showWorkflowStatus && workflowExecutions.length > 0}
+        <div class="workflow-status-indicator">
+          <span class="status-icon">⚙️</span>
+          <span class="status-count">{workflowExecutions.length}</span>
+          <div class="status-tooltip">
+            <div class="status-header">Recent Workflows</div>
+            {#each workflowExecutions.slice(0, 3) as execution}
+              <div class="status-item">
+                <span class="status-badge status-{execution.status}">{execution.status}</span>
+                <span class="status-name">{execution.workflow_id}</span>
+                <span class="status-time">{new Date(execution.created_at).toLocaleTimeString()}</span>
+              </div>
+            {/each}
+            {#if workflowExecutions.length > 3}
+              <div class="status-more">+{workflowExecutions.length - 3} more</div>
+            {/if}
+          </div>
+        </div>
+      {/if}
+      
+      <!-- Regeneration Controls -->
+      <button 
+        class="header-button"
+        on:click={() => showEvolution = !showEvolution}
+        title="Schema Evolution History"
+      >
+        🌿
+      </button>
+      <button 
+        class="header-button"
+        on:click={() => showRegenerator = !showRegenerator}
+        title="Regenerate Service"
+      >
+        🔄
+      </button>
+      
       <!-- ✨ Theme Picker Integration -->
       <ThemePicker {contractUI} compact={true} />
     </div>
@@ -252,6 +345,41 @@
 
   <!-- Main Content Area -->
   <main class="main-content">
+    <!-- Regeneration Panel (Slide-in) -->
+    {#if showRegenerator}
+      <div class="slide-panel regenerator-panel">
+        <div class="panel-header">
+          <h3>Regenerate Service</h3>
+          <button class="close-button" on:click={() => showRegenerator = false}>×</button>
+        </div>
+        <div class="panel-content">
+          <ServiceRegenerator 
+            serviceId={service?.id}
+            serviceName={displayServiceName}
+            currentVersion={service?.version || 1}
+            on:regenerated={() => {
+              showRegenerator = false;
+              // Optionally reload the page or update the service data
+              window.location.reload();
+            }}
+          />
+        </div>
+      </div>
+    {/if}
+    
+    <!-- Schema Evolution Panel (Slide-in) -->
+    {#if showEvolution}
+      <div class="slide-panel evolution-panel">
+        <div class="panel-header">
+          <h3>Schema Evolution</h3>
+          <button class="close-button" on:click={() => showEvolution = false}>×</button>
+        </div>
+        <div class="panel-content">
+          <SchemaEvolution serviceId={serviceSchema} />
+        </div>
+      </div>
+    {/if}
+    
     {#if contractUI && contractUI.pages?.length > 0}
       <!-- Dynamic Contract UI Rendering -->
       <DynamicPageRenderer 
@@ -259,6 +387,7 @@
         {currentPath}
         {serviceSchema}
         serviceName={displayServiceName}
+        {currentRole}
       />
     {:else}
       <!-- Fallback UI for services without contract UI -->
@@ -361,6 +490,27 @@
   }
   
   .sidebar-toggle:hover {
+    background: var(--bg-tertiary, #e5e7eb);
+    color: var(--text-primary, #374151);
+  }
+  
+  /* Header Buttons */
+  .header-button {
+    background: var(--bg-secondary, #f3f4f6);
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: var(--border-radius, 6px);
+    padding: var(--spacing-sm, 8px);
+    cursor: pointer;
+    color: var(--text-secondary, #6b7280);
+    transition: all 0.2s ease;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .header-button:hover {
     background: var(--bg-tertiary, #e5e7eb);
     color: var(--text-primary, #374151);
   }
@@ -567,6 +717,73 @@
     box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.1));
   }
   
+  /* Slide Panels */
+  .slide-panel {
+    position: fixed;
+    top: var(--header-height, 60px);
+    right: 0;
+    width: 480px;
+    height: calc(100vh - var(--header-height, 60px));
+    background: var(--surface-color, #ffffff);
+    border-left: 1px solid var(--border-color, #e5e7eb);
+    box-shadow: var(--shadow-xl, -4px 0 6px -1px rgba(0, 0, 0, 0.1));
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    animation: slideIn 0.3s ease-out;
+  }
+  
+  @keyframes slideIn {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+  
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-lg, 24px);
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+  }
+  
+  .panel-header h3 {
+    margin: 0;
+    font-size: var(--font-size-lg, 18px);
+    font-weight: 600;
+    color: var(--text-primary, #1f2937);
+  }
+  
+  .close-button {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: var(--text-secondary, #6b7280);
+    cursor: pointer;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--border-radius, 6px);
+    transition: all 0.2s ease;
+  }
+  
+  .close-button:hover {
+    background: var(--bg-secondary, #f3f4f6);
+    color: var(--text-primary, #1f2937);
+  }
+  
+  .panel-content {
+    flex: 1;
+    padding: var(--spacing-lg, 24px);
+    overflow-y: auto;
+  }
+  
   /* Responsive Design */
   @media (max-width: 768px) {
     .sidebar {
@@ -588,5 +805,158 @@
     .header-left .service-title {
       display: none;
     }
+    
+    .slide-panel {
+      width: 100%;
+    }
+  }
+  
+  /* Role Selector */
+  .role-selector {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm, 8px);
+    padding: var(--spacing-sm, 8px) var(--spacing-md, 16px);
+    background: var(--bg-secondary, #f3f4f6);
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: var(--border-radius, 6px);
+    font-size: var(--font-size-sm, 14px);
+  }
+  
+  .role-selector label {
+    color: var(--text-secondary, #6b7280);
+    font-weight: 500;
+    margin: 0;
+  }
+  
+  .role-select {
+    background: white;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: var(--font-size-sm, 14px);
+    color: var(--text-primary, #374151);
+    cursor: pointer;
+  }
+  
+  .role-select:focus {
+    outline: none;
+    border-color: var(--primary-color, #1d4ed8);
+    box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.1);
+  }
+  
+  /* Workflow Status Indicator */
+  .workflow-status-indicator {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px;
+    background: var(--bg-secondary, #f3f4f6);
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: var(--border-radius, 6px);
+    font-size: var(--font-size-sm, 14px);
+    cursor: pointer;
+  }
+  
+  .workflow-status-indicator:hover .status-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+  
+  .status-icon {
+    font-size: 16px;
+  }
+  
+  .status-count {
+    background: var(--primary-color, #1d4ed8);
+    color: white;
+    border-radius: 10px;
+    padding: 2px 6px;
+    font-size: 12px;
+    font-weight: 600;
+    min-width: 18px;
+    text-align: center;
+  }
+  
+  .status-tooltip {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 8px;
+    background: white;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    padding: 12px;
+    min-width: 280px;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-8px);
+    transition: all 0.2s ease;
+    z-index: 1000;
+  }
+  
+  .status-header {
+    font-weight: 600;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+    color: var(--text-primary, #1f2937);
+  }
+  
+  .status-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 12px;
+  }
+  
+  .status-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+    text-transform: capitalize;
+  }
+  
+  .status-badge.status-running {
+    background: #fef3c7;
+    color: #d97706;
+  }
+  
+  .status-badge.status-completed {
+    background: #d1fae5;
+    color: #065f46;
+  }
+  
+  .status-badge.status-failed {
+    background: #fee2e2;
+    color: #dc2626;
+  }
+  
+  .status-badge.status-pending {
+    background: #e0e7ff;
+    color: #3730a3;
+  }
+  
+  .status-name {
+    flex: 1;
+    color: var(--text-primary, #374151);
+  }
+  
+  .status-time {
+    color: var(--text-secondary, #6b7280);
+    font-size: 11px;
+  }
+  
+  .status-more {
+    text-align: center;
+    padding-top: 8px;
+    margin-top: 8px;
+    border-top: 1px solid var(--border-color, #e5e7eb);
+    color: var(--text-secondary, #6b7280);
+    font-size: 11px;
   }
 </style>

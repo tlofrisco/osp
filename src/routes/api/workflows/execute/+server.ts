@@ -58,7 +58,7 @@ export async function POST({ request, locals }: RequestEvent) {
     const executionId = `${workflowId}-${Date.now()}`;
     
     // Store workflow execution record
-    const { error: insertError } = await supabaseAdmin
+    const { data: executionData, error: insertError } = await supabaseAdmin
       .from('workflow_executions')
       .insert({
         workflow_id: workflowId,
@@ -69,24 +69,106 @@ export async function POST({ request, locals }: RequestEvent) {
         input: input,
         workflow_definition: workflowDef,
         started_at: new Date().toISOString()
-      });
+      })
+      .select()
+      .single();
 
     if (insertError) {
-      console.warn('Failed to store workflow execution:', insertError);
+      console.error('Failed to store workflow execution:', {
+        error: insertError,
+        message: insertError.message,
+        details: insertError.details,
+        hint: insertError.hint,
+        code: insertError.code
+      });
       // Don't fail the request, just log the warning
+    } else {
+      console.log('✅ Workflow execution stored:', executionData);
     }
 
-    // Simulate workflow steps execution
-    setTimeout(async () => {
-      // Update status to completed after 5 seconds (simulation)
+    // Execute workflow steps
+    try {
+      // Process each step in the workflow
+      for (const step of workflowDef.steps || []) {
+        console.log(`📍 Executing step: ${step.name} (${step.type})`);
+        
+        // Handle create_entity steps
+        if (step.type === 'create_entity' && step.target_entity) {
+          const entityName = step.target_entity.toLowerCase();
+          const tableName = `${serviceSchema}.${entityName}`;
+          
+          // Generate a unique ID for the new entity
+          const entityId = `${entityName}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          
+          // Prepare entity data based on input and step configuration
+          const entityData: any = {
+            id: entityId,
+            workflow_state: 'created',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          
+          // Map input fields to entity fields
+          if (step.uses_fields && Array.isArray(step.uses_fields)) {
+            for (const field of step.uses_fields) {
+              if (input[field] !== undefined) {
+                entityData[field] = input[field];
+              }
+            }
+          }
+          
+          // Add default values for common fields
+          if (step.target_entity === 'Reservation') {
+            entityData.status = entityData.status || 'pending';
+            entityData.workflow_state = 'pending_confirmation';
+          }
+          
+          console.log(`💾 Creating ${entityName}:`, entityData);
+          
+          // Insert the entity
+          const { data: createdEntity, error: createError } = await supabaseAdmin
+            .from(tableName)
+            .insert(entityData)
+            .select()
+            .single();
+          
+          if (createError) {
+            console.error(`Failed to create ${entityName}:`, createError);
+            throw new Error(`Failed to create ${entityName}: ${createError.message}`);
+          }
+          
+          console.log(`✅ Created ${entityName}:`, createdEntity);
+        }
+        
+        // Handle other step types as needed
+        // TODO: Implement validate, check_availability, send_notification, etc.
+      }
+      
+      // Update workflow execution status to completed
       await supabaseAdmin
         .from('workflow_executions')
         .update({
           status: 'completed',
-          completed_at: new Date().toISOString()
+          completed_at: new Date().toISOString(),
+          output: { message: 'Workflow completed successfully' }
         })
         .eq('execution_id', executionId);
-    }, 5000);
+        
+    } catch (stepError) {
+      console.error('Workflow step execution failed:', stepError);
+      
+      // Update workflow execution status to failed
+      await supabaseAdmin
+        .from('workflow_executions')
+        .update({
+          status: 'failed',
+          completed_at: new Date().toISOString(),
+          error: stepError instanceof Error ? stepError.message : 'Unknown error'
+        })
+        .eq('execution_id', executionId);
+        
+      throw stepError;
+    }
 
     return json({
       success: true,

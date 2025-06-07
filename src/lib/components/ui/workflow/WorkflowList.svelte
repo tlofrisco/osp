@@ -5,6 +5,9 @@
   export let serviceSchema: string = '';
   export let serviceName: string = '';
   
+  // Additional props for compatibility (to avoid warnings)
+  export let currentRole: string = 'waitress';
+  
   // Mock workflow data from contract UI metadata
   const workflows = metadata.workflows || [
     { id: 'order_creation', name: 'Order Creation Process', description: 'Handle new customer orders', trigger_type: 'manual' },

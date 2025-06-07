@@ -3,6 +3,11 @@
   export let metadata: any = {};
   export let serviceSchema: string = '';
   export let serviceName: string = '';
+  
+  // Additional props for compatibility (to avoid warnings)
+  export let currentRole: string = 'waitress';
+  export let entityName: string = '';
+  export let fields: any[] = [];
 </script>
 
 <div class="info-card" data-layout={config.layout || 'vertical'}>

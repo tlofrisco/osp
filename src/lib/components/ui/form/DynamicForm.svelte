@@ -2,13 +2,15 @@
   import { createEventDispatcher } from 'svelte';
   
   export let config: any;
-  export let serviceSchema: string;
-  export let serviceName: string = '';
-  export let entityName: string;
-  export let fields: any[] = [];
   export let metadata: any = {};
-  export let theme: any = {};
-  export let globalSettings: any = {};
+  export let serviceSchema: string = '';
+  export let serviceName: string = '';
+  export let entityName: string = '';
+  export let fields: any[] = [];
+  
+  // Additional props for compatibility (to avoid warnings)
+  export let currentRole: string = 'waitress';
+  export let actions: string[] = [];
   
   const dispatch = createEventDispatcher();
   
@@ -19,10 +21,10 @@
   let success = '';
   
   // Extract theme settings with fallbacks
-  const dateFormat = theme.date_format || 'MM/DD/YYYY';
-  const datePlaceholder = theme.date_placeholder || `Enter date (${dateFormat})`;
-  const successColor = globalSettings.success_color || '#16a34a';
-  const errorColor = globalSettings.error_color || '#dc2626';
+  const dateFormat = config.theme?.date_format || 'MM/DD/YYYY';
+  const datePlaceholder = config.theme?.date_placeholder || `Enter date (${dateFormat})`;
+  const successColor = config.globalSettings?.success_color || '#16a34a';
+  const errorColor = config.globalSettings?.error_color || '#dc2626';
   
   // Initialize form data
   $: {

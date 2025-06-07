@@ -48,6 +48,11 @@ export const handle: Handle = async ({ event, resolve }) => {
   const sessionEmail = event.locals.session?.data?.session?.user?.email ?? 'None';
   console.log(`hooks.server.ts: Session Check - User: ${sessionEmail}`);
 
+  // Filter out Chrome DevTools requests to avoid 404 noise
+  if (event.url.pathname.includes('/.well-known/appspecific/com.chrome.devtools')) {
+    return new Response('Not found', { status: 404 });
+  }
+
   const response = await resolve(event, {
     filterSerializedResponseHeaders(name) {
       return name === 'content-range' || name === 'x-supabase-api-version';

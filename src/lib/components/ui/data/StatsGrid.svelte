@@ -6,6 +6,10 @@
   export let serviceSchema: string = '';
   export let entities: any[] = []; // Pass entities from contract UI
   
+  // Additional props for compatibility (to avoid warnings)
+  export let serviceName: string = '';
+  export let currentRole: string = 'waitress';
+  
   let stats: any[] = [];
   let loading = true;
   let error = '';

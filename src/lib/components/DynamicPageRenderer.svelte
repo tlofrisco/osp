@@ -8,6 +8,7 @@
   export let currentPath: string;
   export let serviceSchema: string;
   export let serviceName: string;
+  export let currentRole: string = 'waitress'; // Default role
   
   // State
   let pageConfig: any = null;
@@ -130,7 +131,9 @@
     const baseProps = {
       config: config,
       metadata: config.metadata || {},
-      serviceSchema: serviceSchema
+      serviceSchema: serviceSchema,
+      serviceName: serviceName,
+      currentRole: currentRole
     };
     
     // Component-specific props
@@ -185,14 +188,14 @@
         // For unknown component types, provide all props
         return {
           ...baseProps,
-          serviceName: serviceName,
           entityName: config.entity || '',
           entities: contractUI?.entities || [],
           theme: contractUI?.theme || {},
           globalSettings: contractUI?.global_settings || {},
           columns: config.columns || [],
           fields: config.fields || [],
-          actions: config.actions || []
+          actions: config.actions || [],
+          currentRole: currentRole
         };
     }
   }

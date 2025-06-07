@@ -1,11 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   
+  // Component Props
   export let config: any;
-  export let columns: any[] = [];
   export let metadata: any = {};
-  export let entityName: string = '';
   export let serviceSchema: string = '';
+  export let entityName: string = '';
+  export let columns: any[] = [];
+  
+  // Additional props for compatibility (to avoid warnings)
+  export let serviceName: string = '';
+  export let currentRole: string = 'waitress';
+  export let actions: string[] = [];
   
   let data: any[] = [];
   let loading = true;

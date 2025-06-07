@@ -7,6 +7,9 @@
   export let serviceSchema: string = '';
   export let serviceName: string = '';
   
+  // Additional props for compatibility (to avoid warnings)
+  export let currentRole: string = 'waitress';
+
   const {
     title = 'Workflow Status',
     show_count = true,

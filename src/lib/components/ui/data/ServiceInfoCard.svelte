@@ -2,7 +2,10 @@
   export let config: any;
   export let metadata: any = {};
   export let serviceSchema: string = '';
+  
+  // Additional props for compatibility (to avoid warnings)
   export let serviceName: string = '';
+  export let currentRole: string = 'waitress';
   
   // Extract service information from metadata with fallbacks
   const displayServiceName = metadata.service_name || serviceName || 'Unnamed Service';

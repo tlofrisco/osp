@@ -17,9 +17,10 @@
   
   // Enhanced chat state
   let chatHistory = [];
-  let clarifyingQuestions = [];
-  let currentQuestionIndex = 0;
   let gatheringRequirements = false;
+  let conversationContext = [];
+  let questionCount = 0;
+  const MAX_QUESTIONS = 5; // Limit to avoid endless questioning
 
   onMount(async () => {
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -42,77 +43,102 @@
     error = authError ? authError.message : 'Check your email to confirm signup.';
   }
 
-  // Generate clarifying questions based on the problem statement
-  async function generateClarifyingQuestions(problem) {
-    // Add the problem to chat history
-    chatHistory = [...chatHistory, { type: 'user', content: problem }];
-    
-    // Generate context-aware questions based on the problem
-    const questions = [];
-    
-    // Restaurant-specific questions
-    if (problem.toLowerCase().includes('restaurant') || problem.toLowerCase().includes('reservation')) {
-      questions.push(
-        "How many tables does your restaurant have, and do you need to track different seating areas?",
-        "What types of reservations do you handle (phone, online, walk-in)?",
-        "Do you need to track special requests, dietary restrictions, or VIP customers?",
-        "What's your typical reservation time slot duration (e.g., 2 hours)?",
-        "Do you need integration with a POS system or kitchen management?"
-      );
+  // Generate next clarifying question dynamically based on context
+  async function generateNextQuestion() {
+    loading = true;
+    try {
+      const response = await fetch('/api/osp/generate-question', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          problem: serviceDraft.problem,
+          requirements: serviceDraft.requirements,
+          conversationHistory: conversationContext,
+          questionNumber: questionCount + 1,
+          maxQuestions: MAX_QUESTIONS
+        })
+      });
+      
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to generate question');
+      
+      return data;
+    } catch (err) {
+      console.error('Failed to generate question:', err);
+      // Fallback to finishing if question generation fails
+      return null;
+    } finally {
+      loading = false;
     }
-    // Inventory-specific questions
-    else if (problem.toLowerCase().includes('inventory') || problem.toLowerCase().includes('stock')) {
-      questions.push(
-        "What types of items will you track (raw materials, finished goods, both)?",
-        "Do you need multi-location inventory tracking?",
-        "How do you handle reordering - automatic alerts, purchase orders, or both?",
-        "Do you need to track expiration dates or batch numbers?",
-        "Will you need barcode scanning or RFID integration?"
-      );
-    }
-    // Generic business questions
-    else {
-      questions.push(
-        "What are the main entities or objects you need to track?",
-        "Who are the primary users of this system (roles)?",
-        "What are the most critical workflows or processes?",
-        "Do you need reporting or analytics features?",
-        "Are there any existing systems this needs to integrate with?"
-      );
-    }
-    
-    return questions;
   }
 
   async function handleInitialInput() {
     if (step === 1) {
       serviceDraft.problem = inputValue;
       
-      // Generate clarifying questions
-      gatheringRequirements = true;
-      clarifyingQuestions = await generateClarifyingQuestions(inputValue);
+      // Add to chat history
+      chatHistory = [...chatHistory, { type: 'user', content: inputValue }];
+      conversationContext.push({ role: 'user', content: inputValue });
       
-      // Add AI response to chat
+      // Move to step 2 - ask for specific requirements
       chatHistory = [...chatHistory, { 
         type: 'ai', 
-        content: `Great! I'd like to understand your ${inputValue} better. Let me ask you a few questions to ensure we build exactly what you need.`
+        content: `I understand you want to build ${inputValue}. Do you have any specific requirements or features in mind? (You can type "no" if you'd like me to help you figure them out)`
       }];
-      
-      // Ask first question
-      if (clarifyingQuestions.length > 0) {
-        chatHistory = [...chatHistory, { 
-          type: 'ai', 
-          content: clarifyingQuestions[0]
-        }];
-      }
       
       inputValue = '';
       step = 2;
     }
   }
 
+  async function handleRequirementsInput() {
+    // Add to chat history
+    chatHistory = [...chatHistory, { type: 'user', content: inputValue }];
+    conversationContext.push({ role: 'user', content: inputValue });
+    
+    // Check if user has specific requirements or needs help
+    const hasSpecificRequirements = inputValue.toLowerCase() !== 'no' && 
+                                   inputValue.toLowerCase() !== 'none' &&
+                                   inputValue.length > 10;
+    
+    if (hasSpecificRequirements) {
+      serviceDraft.requirements = inputValue;
+      
+      // Add AI response
+      chatHistory = [...chatHistory, { 
+        type: 'ai', 
+        content: "Great! Let me ask you a few more questions to ensure I understand your needs completely."
+      }];
+    } else {
+      // User needs help figuring out requirements
+      chatHistory = [...chatHistory, { 
+        type: 'ai', 
+        content: "No problem! I'll help you figure out what you need. Let me ask you some questions."
+      }];
+    }
+    
+    inputValue = '';
+    gatheringRequirements = true;
+    
+    // Generate first dynamic question
+    const questionData = await generateNextQuestion();
+    if (questionData && questionData.question) {
+      chatHistory = [...chatHistory, { 
+        type: 'ai', 
+        content: questionData.question,
+        questionType: questionData.type,
+        options: questionData.options
+      }];
+      conversationContext.push({ role: 'assistant', content: questionData.question });
+    } else {
+      // If no question generated, proceed to service generation
+      finishRequirementsGathering();
+    }
+  }
+
   async function handleClarifyingAnswer() {
-    // Add answer to requirements
+    // Add answer to requirements and context
     if (serviceDraft.requirements) {
       serviceDraft.requirements += `. ${inputValue}`;
     } else {
@@ -121,25 +147,40 @@
     
     // Add to chat history
     chatHistory = [...chatHistory, { type: 'user', content: inputValue }];
+    conversationContext.push({ role: 'user', content: inputValue });
     inputValue = '';
     
-    // Move to next question or finish
-    currentQuestionIndex++;
+    questionCount++;
     
-    if (currentQuestionIndex < clarifyingQuestions.length) {
-      // Ask next question
-      chatHistory = [...chatHistory, { 
-        type: 'ai', 
-        content: clarifyingQuestions[currentQuestionIndex]
-      }];
+    // Check if we should ask more questions
+    if (questionCount < MAX_QUESTIONS) {
+      // Generate next question based on all context so far
+      const questionData = await generateNextQuestion();
+      
+      if (questionData && questionData.question) {
+        chatHistory = [...chatHistory, { 
+          type: 'ai', 
+          content: questionData.question,
+          questionType: questionData.type,
+          options: questionData.options
+        }];
+        conversationContext.push({ role: 'assistant', content: questionData.question });
+      } else {
+        // No more questions needed
+        finishRequirementsGathering();
+      }
     } else {
-      // All questions answered, generate service
-      chatHistory = [...chatHistory, { 
-        type: 'ai', 
-        content: "Perfect! I have all the information I need. Let me create your service now..."
-      }];
-      generateSpec();
+      // Reached max questions
+      finishRequirementsGathering();
     }
+  }
+
+  function finishRequirementsGathering() {
+    chatHistory = [...chatHistory, { 
+      type: 'ai', 
+      content: "Perfect! I have all the information I need. Let me create your service now..."
+    }];
+    generateSpec();
   }
 
   async function generateSpec() {
@@ -150,10 +191,13 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(serviceDraft)
+        body: JSON.stringify({
+          ...serviceDraft,
+          conversationContext // Include full conversation for better service generation
+        })
       });
       const data = await response.json();
-      console.log('Response:', data); // ✅ Add this for debug
+      console.log('Response:', data);
       if (!response.ok || data.error) throw new Error(data.error || 'Unknown error');
       const schema = data?.service_schema ?? data?.service?.service_schema;
 
@@ -169,6 +213,12 @@
     } finally {
       loading = false;
     }
+  }
+
+  // Handle option selection for multiple choice questions
+  function selectOption(option) {
+    inputValue = option;
+    handleClarifyingAnswer();
   }
 </script>
 
@@ -189,7 +239,7 @@
     <p>Welcome, {user.email}</p>
     
     {#if step === 1}
-      <h2>What are you looking to build?</h2>
+      <h2>What service would you like to build?</h2>
       <form on:submit|preventDefault={handleInitialInput}>
         <input 
           type="text" 
@@ -199,23 +249,49 @@
         />
         <button type="submit" disabled={loading}>Next</button>
       </form>
-    {:else if gatheringRequirements}
+    {:else}
       <div class="chat-container">
         <div class="chat-history">
           {#each chatHistory as message}
             <div class="chat-message {message.type}">
               <span class="chat-icon">{message.type === 'ai' ? '🤖' : '👤'}</span>
-              <p>{message.content}</p>
+              <div class="message-content">
+                <p>{message.content}</p>
+                
+                <!-- Show options for multiple choice questions -->
+                {#if message.type === 'ai' && message.options && message.options.length > 0}
+                  <div class="options-grid">
+                    {#each message.options as option}
+                      <button 
+                        class="option-button"
+                        on:click={() => selectOption(option)}
+                        disabled={loading}
+                      >
+                        {option}
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
             </div>
           {/each}
+          
+          {#if loading}
+            <div class="chat-message ai">
+              <span class="chat-icon">🤖</span>
+              <div class="message-content">
+                <p class="thinking">Thinking...</p>
+              </div>
+            </div>
+          {/if}
         </div>
         
-        <form on:submit|preventDefault={handleClarifyingAnswer} class="chat-input">
+        <form on:submit|preventDefault={step === 2 && !gatheringRequirements ? handleRequirementsInput : handleClarifyingAnswer} class="chat-input">
           <input 
             type="text" 
             bind:value={inputValue} 
             required 
-            placeholder="Type your answer..." 
+            placeholder={step === 2 && !gatheringRequirements ? "Describe any specific requirements..." : "Type your answer..."} 
             disabled={loading}
           />
           <button type="submit" disabled={loading}>
@@ -225,7 +301,6 @@
       </div>
     {/if}
     
-    {#if loading && !gatheringRequirements}<p>Loading...</p>{/if}
     {#if error && !loading}<p style="color: red">{error}</p>{/if}
   {/if}
 </main>
@@ -250,7 +325,7 @@
   .chat-container {
     display: flex;
     flex-direction: column;
-    height: 500px;
+    height: 600px;
     border: 1px solid #e5e7eb;
     border-radius: 8px;
     overflow: hidden;
@@ -281,11 +356,14 @@
     flex-shrink: 0;
   }
   
+  .message-content {
+    max-width: 70%;
+  }
+  
   .chat-message p {
     margin: 0;
     padding: 0.75rem 1rem;
     border-radius: 8px;
-    max-width: 70%;
     line-height: 1.5;
   }
   
@@ -297,6 +375,39 @@
   .chat-message.user p {
     background: #3b82f6;
     color: white;
+  }
+  
+  .thinking {
+    color: #6b7280;
+    font-style: italic;
+  }
+  
+  .options-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+  
+  .option-button {
+    padding: 0.5rem 1rem;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.2s;
+    font-size: 0.875rem;
+  }
+  
+  .option-button:hover:not(:disabled) {
+    background: #f3f4f6;
+    border-color: #3b82f6;
+  }
+  
+  .option-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
   
   .chat-input {
