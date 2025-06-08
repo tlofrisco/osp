@@ -1,0 +1,12 @@
+node_modules
+.git
+.DS_Store
+*.log
+tmp/
+.cache/
+.vercel/
+.svelte-kit/
+
+# Include manifests for worker deployment
+!manifests/
+!workers/manifests/ 

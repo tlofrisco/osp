@@ -1,0 +1,22 @@
+{
+  "name": "osp-workers",
+  "version": "1.0.0",
+  "description": "Manifest-driven Temporal workers for OSP services",
+  "type": "module",
+  "main": "launch-worker.js",
+  "scripts": {
+    "start": "node launch-worker.js",
+    "help": "node launch-worker.js --help"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.38.0",
+    "@temporalio/activity": "^1.10.1",
+    "@temporalio/client": "^1.10.1",
+    "@temporalio/worker": "^1.10.1",
+    "@temporalio/workflow": "^1.10.1",
+    "dotenv": "^16.5.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

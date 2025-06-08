@@ -14,7 +14,7 @@
   let error = '';
   let loading = false;
   let serviceDraft = { problem: '', requirements: '', frameworks: ['TMForumSID', 'ARTS'] };
-  
+
   // Enhanced chat state
   let chatHistory = [];
   let gatheringRequirements = false;
@@ -297,7 +297,7 @@
           <button type="submit" disabled={loading}>
             {loading ? 'Processing...' : 'Send'}
           </button>
-        </form>
+    </form>
       </div>
     {/if}
     

@@ -1,12 +1,15 @@
 {
-	"name": "osp",
-	"version": "0.0.1",
+	"name": "osp-monorepo",
+	"version": "1.0.0",
 	"private": true,
 	"scripts": {
 		"dev": "vite dev --logLevel info",
 		"build": "vite build",
 		"preview": "vite preview",
-		"prepare": "svelte-kit sync"
+		"prepare": "svelte-kit sync",
+		"workers": "tsx scripts/start-workers.ts",
+		"worker": "cd workers && node launch-worker.js",
+		"worker-standalone": "node workers/standalone-worker.js"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-vercel": "^5.4.0",
@@ -14,6 +17,7 @@
 		"@sveltejs/vite-plugin-svelte": "^3.1.2",
 		"@tsconfig/svelte": "^5.0.4",
 		"svelte": "^4.2.19",
+		"tsx": "^4.19.4",
 		"typescript": "^5.8.2",
 		"vite": "^5.4.8"
 	},

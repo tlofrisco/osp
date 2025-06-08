@@ -19,7 +19,7 @@ const clientCache = new Map<string, Client>();
 /**
  * Create a connection to Temporal Cloud (supports both API Key and Certificate auth)
  */
-async function createTemporalConnection(): Promise<Connection> {
+export async function createTemporalConnection(): Promise<Connection> {
   const cacheKey = 'default';
   
   if (connectionCache.has(cacheKey)) {
