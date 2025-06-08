@@ -14,7 +14,6 @@ RUN npm ci --production || npm install --production
 # Copy all source files
 WORKDIR /app
 COPY workers/ ./workers/
-COPY manifests/ ./workers/manifests/
 COPY workflows/ ./workflows/
 
 # Set working directory to workers
@@ -23,5 +22,5 @@ WORKDIR /app/workers
 # Make scripts executable
 RUN chmod +x *.js || true
 
-# Start the worker using launch-worker.js (reads from MANIFEST_PATH env var)
+# Start the worker using launch-worker.js (reads from MANIFEST_ID env var)
 CMD ["node", "launch-worker.js"] 

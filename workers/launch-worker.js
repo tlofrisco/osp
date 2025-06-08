@@ -6,13 +6,12 @@
  * Production-ready script to launch Temporal workers from service manifests.
  * Designed for cloud deployment with comprehensive logging and error handling.
  * 
- * Usage: node launch-worker.js <manifest-path>
- * Example: node launch-worker.js manifests/service_[ID].json
+ * Usage: Reads MANIFEST_ID from environment variable
+ * Example: MANIFEST_ID=uuid-string node launch-worker.js
  */
 
 import { createWorkerFromManifest } from './generator/createWorkerFromManifest.js';
 import { createClient } from '@supabase/supabase-js';
-import fs from 'fs/promises';
 import dotenv from 'dotenv';
 import path from 'path';
 
@@ -85,34 +84,24 @@ async function main() {
   console.log('🚀 OSP Worker Launcher Starting...');
   console.log('🕒 Timestamp:', new Date().toISOString());
   
-  // Validate MANIFEST_PATH
-  const manifestPath = process.env.MANIFEST_PATH;
-  if (!manifestPath) {
-    console.error('❌ MANIFEST_PATH not set. Exiting...');
+  // Validate MANIFEST_ID
+  const manifestId = process.env.MANIFEST_ID;
+  if (!manifestId) {
+    console.error('❌ MANIFEST_ID not set. Exiting...');
     process.exit(1);
   }
   
-  console.log('📋 Manifest path:', manifestPath);
+  console.log('📋 Manifest ID:', manifestId);
   
   try {
-    // 📄 Load and parse manifest
-    console.log('📄 Loading manifest file...');
-    const raw = await fs.readFile(manifestPath, 'utf-8');
-    const manifest = JSON.parse(raw);
+    // 📄 Fetch manifest from Supabase and start worker
+    console.log('📄 Fetching manifest from Supabase...');
     
-    currentServiceSchema = manifest.service_schema;
-    console.log('🔁 Service schema:', currentServiceSchema);
-    console.log('📌 Task queue:', manifest.workflows[0]?.task_queue || `${currentServiceSchema}-tasks`);
-    
-    // Log startup to Supabase
-    await logToSupabase('starting', `Worker starting for service: ${currentServiceSchema}`);
-    
-    // 🌐 Connect to Temporal and start worker
-    console.log('🌐 Connecting to Temporal...');
-    await createWorkerFromManifest(manifest);
+    // The createWorkerFromManifest will handle fetching from Supabase
+    await createWorkerFromManifest(manifestId);
     
     // This line should never be reached since createWorkerFromManifest runs indefinitely
-    console.log('✅ Worker created for manifest:', manifestPath);
+    console.log('✅ Worker created for manifest ID:', manifestId);
     
   } catch (err) {
     console.error('❌ Failed to start worker:');

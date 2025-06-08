@@ -6,8 +6,7 @@
  */
 
 import { queueWorkerBuild } from '../../../workers/queueWorkerBuild';
-import fs from 'fs/promises';
-import path from 'path';
+import { supabaseAdmin } from '$lib/supabaseAdmin';
 
 interface ServiceConfig {
   serviceSchema: string;
@@ -38,19 +37,19 @@ export async function deployWorkerForService(serviceConfig: ServiceConfig) {
   console.log(`🎯 Starting worker deployment for service: ${serviceConfig.serviceSchema}`);
   
   try {
-    // 1. Generate service manifest
-    const manifestPath = await generateServiceManifest(serviceConfig);
-    console.log(`📄 Generated manifest: ${manifestPath}`);
+    // 1. Generate service manifest and store in Supabase
+    const manifestId = await generateServiceManifest(serviceConfig);
+    console.log(`📄 Generated manifest with ID: ${manifestId}`);
     
     // 2. Trigger automated worker deployment
-    const deploymentResult = await queueWorkerBuild(serviceConfig.serviceSchema);
+    const deploymentResult = await queueWorkerBuild(serviceConfig.serviceSchema, manifestId);
     
     if (deploymentResult.success) {
       console.log(`✅ Worker deployment queued successfully for ${serviceConfig.serviceSchema}`);
       return {
         success: true,
         service_schema: serviceConfig.serviceSchema,
-        manifest_path: manifestPath,
+        manifest_id: manifestId,
         deployment_id: deploymentResult
       };
     } else {
@@ -73,7 +72,8 @@ export async function deployWorkerForService(serviceConfig: ServiceConfig) {
 }
 
 /**
- * Generates a service manifest based on OSP service configuration
+ * Generates a service manifest and stores it in Supabase
+ * Returns the inserted manifest UUID
  */
 async function generateServiceManifest(serviceConfig: ServiceConfig): Promise<string> {
   const manifest: WorkerManifest = {
@@ -87,16 +87,28 @@ async function generateServiceManifest(serviceConfig: ServiceConfig): Promise<st
     }))
   };
   
-  // Ensure manifests directory exists
-  const manifestsDir = path.join(process.cwd(), 'manifests');
-  await fs.mkdir(manifestsDir, { recursive: true });
+  console.log(`📝 Storing manifest for ${serviceConfig.serviceSchema} in Supabase:`, manifest);
   
-  // Write manifest file
-  const manifestPath = path.join(manifestsDir, `${serviceConfig.serviceSchema}.json`);
-  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+  // Insert manifest into Supabase service_manifests table
+  const { data, error } = await supabaseAdmin
+    .schema('osp_metadata')
+    .from('service_manifests')
+    .insert({
+      service_id: serviceConfig.serviceSchema,
+      service_name: serviceConfig.serviceName,
+      manifest_content: manifest,
+      created_at: new Date().toISOString(),
+      status: 'active'
+    })
+    .select('id')
+    .single();
   
-  console.log(`📝 Manifest generated for ${serviceConfig.serviceSchema}:`, manifest);
-  return manifestPath;
+  if (error) {
+    throw new Error(`Failed to store manifest in Supabase: ${error.message}`);
+  }
+  
+  console.log(`📄 Manifest stored in Supabase with ID: ${data.id}`);
+  return data.id;
 }
 
 /**

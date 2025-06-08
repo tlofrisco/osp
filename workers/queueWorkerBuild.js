@@ -15,10 +15,10 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-export async function queueWorkerBuild(service_schema, retryCount = 0) {
+export async function queueWorkerBuild(service_schema, manifest_id, retryCount = 0) {
   console.log(`🚀 Deploying worker for: ${service_schema} (attempt ${retryCount + 1})`);
+  console.log(`📋 Using manifest ID: ${manifest_id}`);
   
-  const manifestPath = `manifests/${service_schema}.json`;
   const maxRetries = 3;
   
   // Log deployment attempt to worker_registry
@@ -26,7 +26,7 @@ export async function queueWorkerBuild(service_schema, retryCount = 0) {
     .from('worker_registry')
     .insert({
       service_schema,
-      manifest_path: manifestPath,
+      manifest_path: `supabase:${manifest_id}`, // Store manifest ID with prefix
       deployment_status: 'deploying',
       logs: `Started deployment attempt ${retryCount + 1}`
     })
@@ -38,10 +38,11 @@ export async function queueWorkerBuild(service_schema, retryCount = 0) {
   }
 
   try {
-    const setEnvCmd = `railway variables --set "MANIFEST_PATH=${manifestPath}"`;
+    // Set manifest ID as environment variable instead of file path
+    const setEnvCmd = `railway variables set MANIFEST_ID=${manifest_id}`;
     const deployCmd = `railway up`;
     
-    console.log(`📝 Setting MANIFEST_PATH: ${manifestPath}`);
+    console.log(`📝 Setting MANIFEST_ID: ${manifest_id}`);
     console.log(`🚢 Executing: ${setEnvCmd} && ${deployCmd}`);
     
     const { stdout, stderr } = await execAsync(`${setEnvCmd} && ${deployCmd}`);
@@ -81,7 +82,7 @@ export async function queueWorkerBuild(service_schema, retryCount = 0) {
     if (retryCount < maxRetries) {
       console.log(`🔄 Retrying deployment for ${service_schema} (${retryCount + 1}/${maxRetries})`);
       await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-      return queueWorkerBuild(service_schema, retryCount + 1);
+      return queueWorkerBuild(service_schema, manifest_id, retryCount + 1);
     } else {
       console.error(`💥 Max retries exceeded for ${service_schema}. Manual intervention required.`);
       

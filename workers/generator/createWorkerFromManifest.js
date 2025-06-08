@@ -2,7 +2,6 @@ import { Worker } from '@temporalio/worker';
 import { Connection } from '@temporalio/client';
 import { createClient } from '@supabase/supabase-js';
 import path from 'path';
-import fs from 'fs/promises';
 import dotenv from 'dotenv';
 
 // Load environment variables - supports both .env and .env.production
@@ -38,16 +37,42 @@ async function logWorkerStatus(serviceSchema, status, message) {
   }
 }
 
+/**
+ * Fetch manifest from Supabase using manifest ID
+ */
+async function fetchManifestFromSupabase(manifestId) {
+  try {
+    const { data, error } = await supabase
+      .schema('osp_metadata')
+      .from('service_manifests')
+      .select('manifest_content, service_id, service_name')
+      .eq('id', manifestId)
+      .single();
+    
+    if (error) {
+      throw new Error(`Failed to fetch manifest: ${error.message}`);
+    }
+    
+    if (!data) {
+      throw new Error(`Manifest not found with ID: ${manifestId}`);
+    }
+    
+    console.log(`✅ Fetched manifest from Supabase for service: ${data.service_id}`);
+    return data.manifest_content;
+  } catch (error) {
+    console.error(`❌ Error fetching manifest from Supabase:`, error);
+    throw error;
+  }
+}
+
 export async function createWorkerFromManifest(manifestInput) {
   let manifest;
   let serviceSchema;
   
-  // Support both manifest object and path for flexibility
+  // Support both manifest object and manifest ID
   if (typeof manifestInput === 'string') {
-    console.log(`🔄 Loading service manifest from path: ${manifestInput}`);
-    const fullPath = path.resolve(manifestInput);
-    const manifestRaw = await fs.readFile(fullPath, 'utf-8');
-    manifest = JSON.parse(manifestRaw);
+    console.log(`🔄 Loading service manifest from Supabase ID: ${manifestInput}`);
+    manifest = await fetchManifestFromSupabase(manifestInput);
   } else {
     console.log(`🔄 Using provided manifest object`);
     manifest = manifestInput;
