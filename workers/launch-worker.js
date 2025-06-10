@@ -13,10 +13,16 @@
 import { createWorkerFromManifest } from './generator/createWorkerFromManifest.js';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
-import path from 'path';
 
 // Load environment variables
-dotenv.config({ path: path.join(process.cwd(), '../.env') });
+dotenv.config();
+
+// Sanity check for missing environment variables
+if (!process.env.PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.error('❌ Missing Supabase environment variables. Aborting.');
+  console.error('Expected: PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY');
+  process.exit(1);
+}
 
 // Initialize Supabase for logging
 const supabase = createClient(

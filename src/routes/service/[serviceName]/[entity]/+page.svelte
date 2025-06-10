@@ -162,17 +162,25 @@
     <form on:submit|preventDefault={submitForm}>
       {#each inputs as input}
         <label for={input.name}>{input.name}</label>
-        <input
-          id={input.name}
-          type={
-            input.type.includes('int') || input.type.includes('numeric') || input.type === 'number'
-              ? 'number'
-              : input.type.includes('date') || input.type === 'timestamptz'
-              ? 'date'
-              : 'text'
-          }
-          bind:value={formData[input.name]}
-        />
+        {#if input.type.includes('int') || input.type.includes('numeric') || input.type === 'number'}
+          <input
+            id={input.name}
+            type="number"
+            bind:value={formData[input.name]}
+          />
+        {:else if input.type.includes('date') || input.type === 'timestamptz'}
+          <input
+            id={input.name}
+            type="date"
+            bind:value={formData[input.name]}
+          />
+        {:else}
+          <input
+            id={input.name}
+            type="text"
+            bind:value={formData[input.name]}
+          />
+        {/if}
       {/each}
       <button type="submit" disabled={saving}>Add</button>
     </form>

@@ -1,5 +1,73 @@
 // src/lib/manifestResolver.ts
 import { supabaseAdmin } from '$lib/supabaseAdmin';
+import { type ManifestStatus } from './osp/manifestAudit';
+
+/**
+ * 🔍 Get Latest Manifest for Service (UUID-based)
+ * 
+ * Fetches the latest manifest for a given service_id using UUID-based lookups.
+ * This replaces legacy service name/schema based lookups.
+ * 
+ * Part of OSP Refactor Sets 04+05+07: Governance, Locking, and Auditability
+ */
+export async function getLatestManifestForService(serviceId: string, statusFilter: ManifestStatus[] = ['active']) {
+  const { data, error } = await supabaseAdmin
+    .schema('osp_metadata')
+    .from('service_manifests')
+    .select('*')
+    .eq('service_id', serviceId)
+    .in('status', statusFilter)  // 🔐 Only fetch manifests with allowed status
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error) {
+    console.error('❌ Failed to fetch latest manifest:', error);
+    return null;
+  }
+
+  // 🔐 Additional governance check
+  if (data && data.status === 'locked') {
+    console.warn('⚠️ Retrieved locked manifest - read-only access only');
+  }
+
+  console.log('📄 Latest manifest loaded for service', serviceId, '→', data?.id, `(status: ${data?.status})`);
+  return data;
+}
+
+/**
+ * 🔍 Get Manifest by UUID
+ * 
+ * Direct lookup of manifest by its UUID (preferred method).
+ * Includes governance status checking.
+ */
+export async function getManifestById(manifestId: string, allowedStatuses: ManifestStatus[] = ['active', 'locked', 'deprecated']) {
+  const { data, error } = await supabaseAdmin
+    .schema('osp_metadata')
+    .from('service_manifests')
+    .select('*')
+    .eq('id', manifestId)
+    .single();
+
+  if (error) {
+    console.error('❌ Failed to fetch manifest by ID:', error);
+    return null;
+  }
+
+  // 🔐 Status validation
+  if (data && !allowedStatuses.includes(data.status as ManifestStatus)) {
+    console.warn(`⚠️ Manifest ${manifestId} has status '${data.status}' which is not in allowed list:`, allowedStatuses);
+    return null;
+  }
+
+  // 🔐 Additional governance logging
+  if (data && data.status === 'locked') {
+    console.warn('⚠️ Retrieved locked manifest - read-only access only');
+  }
+
+  console.log('📄 Manifest loaded by UUID', manifestId, `(status: ${data?.status}, version: ${data?.version})`);
+  return data;
+}
 
 export async function resolveManifest({
   baseManifest,

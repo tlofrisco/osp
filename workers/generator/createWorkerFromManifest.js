@@ -4,11 +4,14 @@ import { createClient } from '@supabase/supabase-js';
 import path from 'path';
 import dotenv from 'dotenv';
 
-// Load environment variables - supports both .env and .env.production
+// Load environment variables
 dotenv.config();
-dotenv.config({ path: path.join(process.cwd(), '../.env') }); // Load from parent directory
-if (process.env.NODE_ENV === 'production') {
-  dotenv.config({ path: '.env.production' });
+
+// Sanity check for missing environment variables
+if (!process.env.PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.error('❌ Missing Supabase environment variables. Aborting.');
+  console.error('Expected: PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY');
+  process.exit(1);
 }
 
 // Initialize Supabase for worker status logging
@@ -38,14 +41,17 @@ async function logWorkerStatus(serviceSchema, status, message) {
 }
 
 /**
- * Fetch manifest from Supabase using manifest ID
+ * 🔍 Fetch manifest from Supabase using manifest UUID (v4.0 - Governance)
+ * 
+ * Enhanced with governance validation and deployment status checking.
+ * Part of OSP Refactor Sets 04+05+07: Governance, Locking, and Auditability
  */
 async function fetchManifestFromSupabase(manifestId) {
   try {
     const { data, error } = await supabase
       .schema('osp_metadata')
       .from('service_manifests')
-      .select('manifest_content, service_id, service_name')
+      .select('id, service_id, service_name, version, status, manifest, created_at, locked_fields')
       .eq('id', manifestId)
       .single();
     
@@ -57,8 +63,42 @@ async function fetchManifestFromSupabase(manifestId) {
       throw new Error(`Manifest not found with ID: ${manifestId}`);
     }
     
-    console.log(`✅ Fetched manifest from Supabase for service: ${data.service_id}`);
-    return data.manifest_content;
+    // 🔐 GOVERNANCE: Validate manifest status for deployment
+    if (data.status === 'draft') {
+      throw new Error(`❌ Cannot deploy draft manifest ${manifestId}. Manifest must be 'active' for live deployment.`);
+    }
+    
+    if (data.status === 'deprecated') {
+      console.warn(`⚠️ CAUTION: Deploying deprecated manifest ${manifestId}. Consider updating to latest version.`);
+    }
+    
+    if (data.status === 'locked') {
+      console.warn(`🔒 Deploying locked manifest ${manifestId} - this version cannot be modified.`);
+    }
+    
+    if (data.status !== 'active' && data.status !== 'locked') {
+      console.warn(`⚠️ Manifest ${manifestId} has status: ${data.status}. Only 'active' manifests are recommended for production.`);
+    }
+    
+    console.log(`✅ Fetched manifest from Supabase (GOVERNANCE VALIDATED):`);
+    console.log(`   📄 ID: ${data.id}`);
+    console.log(`   🏷️  Service: ${data.service_id}`);
+    console.log(`   📦 Version: ${data.version || 'unversioned'}`);
+    console.log(`   🟢 Status: ${data.status} ${data.status === 'active' ? '✅' : data.status === 'locked' ? '🔒' : '⚠️'}`);
+    console.log(`   🔐 Locked Fields: ${data.locked_fields ? data.locked_fields.join(', ') : 'none'}`);
+    console.log(`   📅 Created: ${data.created_at}`);
+    
+    // Return both the manifest content and metadata for governance logging
+    return {
+      content: data.manifest,
+      metadata: {
+        id: data.id,
+        service_id: data.service_id,
+        status: data.status,
+        version: data.version,
+        locked_fields: data.locked_fields
+      }
+    };
   } catch (error) {
     console.error(`❌ Error fetching manifest from Supabase:`, error);
     throw error;
@@ -67,15 +107,19 @@ async function fetchManifestFromSupabase(manifestId) {
 
 export async function createWorkerFromManifest(manifestInput) {
   let manifest;
+  let manifestMetadata;
   let serviceSchema;
   
   // Support both manifest object and manifest ID
   if (typeof manifestInput === 'string') {
     console.log(`🔄 Loading service manifest from Supabase ID: ${manifestInput}`);
-    manifest = await fetchManifestFromSupabase(manifestInput);
+    const manifestData = await fetchManifestFromSupabase(manifestInput);
+    manifest = manifestData.content;
+    manifestMetadata = manifestData.metadata;
   } else {
     console.log(`🔄 Using provided manifest object`);
     manifest = manifestInput;
+    manifestMetadata = null; // No metadata for direct manifest objects
   }
   
   try {
@@ -86,6 +130,15 @@ export async function createWorkerFromManifest(manifestInput) {
     console.log(`🔁 Spawning worker for service schema: ${service_schema}`);
     console.log(`📌 Task Queue: ${taskQueue}`);
     console.log(`⚙️ Workflows to load:`, workflows.map(w => w.name));
+    
+    // 🔐 Log governance information if available
+    if (manifestMetadata) {
+      console.log(`🔐 GOVERNANCE INFO:`);
+      console.log(`   📄 Manifest ID: ${manifestMetadata.id}`);
+      console.log(`   📦 Version: ${manifestMetadata.version || 'unversioned'}`);
+      console.log(`   🟢 Status: ${manifestMetadata.status}`);
+      console.log(`   🔒 Locked Fields: ${manifestMetadata.locked_fields ? manifestMetadata.locked_fields.join(', ') : 'none'}`);
+    }
 
     // Log worker startup to Supabase
     await logWorkerStatus(serviceSchema, 'starting', `Worker initializing for service: ${serviceSchema}\nTask Queue: ${taskQueue}\nWorkflows: ${workflows.map(w => w.name).join(', ')}`);

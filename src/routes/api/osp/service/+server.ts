@@ -7,6 +7,7 @@ import { OPENAI_API_KEY } from '$env/static/private';
 import { sanitizeBlendedModel, validateBlendedModel } from '$lib/osp/modelValidation';
 import { buildContractUIFromModel, buildWorkflowsFromModel } from '$lib/osp';
 import { workflowOrchestrator, type ServiceOperation } from '$lib/osp/dsl/workflowOrchestrator';
+import { deployWorkerForService } from '$lib/osp/workerIntegration';
 //import fetch from 'node-fetch';
 
 // --- Utilities ---
@@ -749,6 +750,30 @@ Rules:
   }
 
   console.log('✅ Service and manifest saved successfully with ID:', serviceInsert.id);
+
+  // 🔧 NEW: Integrate with governance-enabled manifest system
+  const serviceConfig = {
+    serviceSchema: serviceSchema,
+    serviceName: serviceDraft.servicename || serviceSchema,
+    workflows: defaultManifest.workflows || []
+  };
+
+  try {
+    console.log('🎯 Calling deployWorkerForService for governance integration...');
+    const workerResult = await deployWorkerForService(serviceConfig);
+    
+    if (workerResult.success) {
+      console.log('✅ Worker integration successful:', {
+        service_schema: workerResult.service_schema,
+        manifest_id: workerResult.manifest_id,
+        deployment_id: workerResult.deployment_id
+      });
+    } else {
+      console.warn('⚠️ Worker integration failed:', workerResult.error);
+    }
+  } catch (workerError) {
+    console.warn('⚠️ Worker integration error (service still created):', workerError);
+  }
 
   // 🎭 Orchestrate service creation with workflow execution and coherence monitoring
   console.log('🎭 Triggering workflow orchestration for service creation...');

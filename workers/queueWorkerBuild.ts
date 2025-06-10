@@ -2,8 +2,19 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { createClient } from '@supabase/supabase-js';
+import * as dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 const execAsync = promisify(exec);
+
+// Sanity check for missing environment variables
+if (!process.env.PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.error('❌ Missing Supabase environment variables. Aborting.');
+  console.error('Expected: PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY');
+  process.exit(1);
+}
 
 // Initialize Supabase client for worker registry tracking
 const supabase = createClient(
@@ -35,10 +46,12 @@ export async function queueWorkerBuild(service_schema: string, manifest_id: stri
 
   try {
     // Set manifest ID as environment variable instead of file path
-    const setEnvCmd = `railway variables set MANIFEST_ID=${manifest_id}`;
-    const deployCmd = `railway up`;
+    const railwayServiceName = `osp-worker-${service_schema}`;
+    const setEnvCmd = `railway variables --set "MANIFEST_ID=${manifest_id}" --service ${railwayServiceName}`;
+    const deployCmd = `railway up --service ${railwayServiceName}`;
     
     console.log(`📝 Setting MANIFEST_ID: ${manifest_id}`);
+    console.log(`🚂 Railway service: ${railwayServiceName}`);
     console.log(`🚢 Executing: ${setEnvCmd} && ${deployCmd}`);
     
     const { stdout, stderr } = await execAsync(`${setEnvCmd} && ${deployCmd}`);

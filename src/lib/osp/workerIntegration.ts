@@ -3,10 +3,18 @@
  * 
  * Connects OSP service creation to automated worker deployment.
  * Called automatically when services are created via OSP UI.
+ * 
+ * Part of OSP Refactor Sets 04+05+07: Governance, Locking, and Auditability
  */
 
-import { queueWorkerBuild } from '../../../workers/queueWorkerBuild';
+import { queueWorkerBuild } from '../../../workers/queueWorkerBuild.js';
 import { supabaseAdmin } from '$lib/supabaseAdmin';
+import { 
+  enforceManifestGovernance, 
+  logAuditEntry, 
+  type ManifestStatus,
+  type AuditLogEntry
+} from './manifestAudit';
 
 interface ServiceConfig {
   serviceSchema: string;
@@ -72,7 +80,7 @@ export async function deployWorkerForService(serviceConfig: ServiceConfig) {
 }
 
 /**
- * Generates a service manifest and stores it in Supabase
+ * Generates a service manifest and stores it in Supabase with governance
  * Returns the inserted manifest UUID
  */
 async function generateServiceManifest(serviceConfig: ServiceConfig): Promise<string> {
@@ -87,28 +95,95 @@ async function generateServiceManifest(serviceConfig: ServiceConfig): Promise<st
     }))
   };
   
-  console.log(`📝 Storing manifest for ${serviceConfig.serviceSchema} in Supabase:`, manifest);
+  console.log(`📝 Generating manifest for ${serviceConfig.serviceSchema} with governance`);
   
-  // Insert manifest into Supabase service_manifests table
-  const { data, error } = await supabaseAdmin
-    .schema('osp_metadata')
-    .from('service_manifests')
-    .insert({
-      service_id: serviceConfig.serviceSchema,
-      service_name: serviceConfig.serviceName,
-      manifest_content: manifest,
-      created_at: new Date().toISOString(),
-      status: 'active'
-    })
-    .select('id')
-    .single();
+  // 🔐 Prepare manifest data with governance fields
+  const manifestData = {
+    service_id: serviceConfig.serviceSchema,
+    service_name: serviceConfig.serviceName,
+    version: 'v1.0.0',
+    manifest: manifest,  // Fixed: Use correct column name
+    created_at: new Date().toISOString(),
+    status: 'active' as ManifestStatus,
+    locked_fields: ['service_id', 'schema_name']  // Default locked fields
+  };
   
-  if (error) {
-    throw new Error(`Failed to store manifest in Supabase: ${error.message}`);
+  // 🔐 Enforce governance rules for manifest creation
+  const governance = await enforceManifestGovernance('create', manifestData, {
+    userId: 'system', // Could be actual user ID in future
+    reason: `Service creation for ${serviceConfig.serviceSchema}`
+  });
+  
+  if (!governance.allowed) {
+    throw new Error(`Manifest governance violation: ${governance.errors.join(', ')}`);
   }
   
-  console.log(`📄 Manifest stored in Supabase with ID: ${data.id}`);
-  return data.id;
+  // Log governance warnings if any
+  if (governance.warnings.length > 0) {
+    console.warn('⚠️ Governance warnings:', governance.warnings);
+  }
+  
+  // 🔄 Insert manifest using RPC + fallback approach
+  let manifestId: string;
+  
+  try {
+    // Try RPC first (bypasses schema cache issues)
+    console.log('📡 Attempting RPC insertion to bypass schema cache...');
+    const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc('insert_service_manifest', {
+      p_service_id: manifestData.service_id,
+      p_service_name: manifestData.service_name,
+      p_version: manifestData.version,
+      p_manifest: manifestData.manifest,  // Fixed: Use correct property name
+      p_status: manifestData.status,
+      p_locked_fields: manifestData.locked_fields
+    });
+    
+    if (rpcError || !rpcData || rpcData.length === 0) {
+      console.warn('📡 RPC method failed, trying direct insert fallback...', rpcError?.message);
+      
+      // Fallback to direct table insert
+      const { data: directData, error: directError } = await supabaseAdmin
+        .schema('osp_metadata')
+        .from('service_manifests')
+        .insert(manifestData)
+        .select('id')
+        .single();
+      
+      if (directError || !directData) {
+        throw new Error(`Both RPC and direct insert failed. RPC: ${rpcError?.message}, Direct: ${directError?.message}`);
+      }
+      
+      manifestId = directData.id;
+      console.log('✅ Direct insert successful (fallback method)');
+    } else {
+      manifestId = rpcData[0].manifest_id;
+      console.log('✅ RPC insert successful (primary method)');
+    }
+  } catch (insertError) {
+    console.error('❌ Manifest insertion completely failed:', insertError);
+    throw new Error(`Failed to store manifest in Supabase: ${insertError instanceof Error ? insertError.message : 'Unknown error'}`);
+  }
+  
+  // 📝 Log audit entry for manifest creation
+  const auditEntry: AuditLogEntry = {
+    action: 'create',
+    manifest_id: manifestId,
+    changed_by: 'system',
+    changed_at: new Date().toISOString(),
+    changes: {
+      'manifest_creation': {
+        before: undefined,
+        after: manifestData,
+        changeType: 'added'
+      }
+    },
+    reason: `Service creation for ${serviceConfig.serviceSchema}`
+  };
+  
+  await logAuditEntry(auditEntry);
+  
+  console.log(`✅ Manifest stored with governance: ID=${manifestId}, version=v1.0.0, status=active`);
+  return manifestId;
 }
 
 /**

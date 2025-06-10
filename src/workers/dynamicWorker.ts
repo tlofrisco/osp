@@ -398,29 +398,28 @@ function createDynamicWorkflow(workflowDef: WorkflowDefinition) {
 }
 
 /**
- * Main worker startup
+ * Main worker startup - Updated for UUID-based manifest system
  */
 export async function startDynamicWorker(serviceSchema: string) {
   console.log(`🤖 Starting Dynamic Worker for service: ${serviceSchema}`);
+  console.log(`⚠️ Note: Consider using manifest UUID directly for better performance`);
   
   try {
-    // Get service manifest with workflows - check multiple tables
-    let manifest = null;
+    // 🔍 Use new UUID-based manifest system
+    const { getLatestManifestForService } = await import('../../src/lib/manifestResolver');
+    
     let workflows = [];
     
-    // Try service_manifests table first
-    const { data: manifestData, error: manifestError } = await supabaseAdmin
-      .from('service_manifests')
-      .select('*')
-      .eq('schema_name', serviceSchema)
-      .single();
+    // Try getting latest manifest from service_manifests table using new helper
+    console.log(`🔍 Fetching latest manifest for service: ${serviceSchema}`);
+    const manifestData = await getLatestManifestForService(serviceSchema);
     
-    if (manifestData && !manifestError) {
-      manifest = manifestData;
-      workflows = manifest.workflows || [];
+    if (manifestData && manifestData.manifest) {
+      console.log(`✅ Found manifest (${manifestData.version || 'unversioned'}) for service: ${serviceSchema}`);
+      workflows = manifestData.manifest.workflows || [];
     } else {
-      // Fallback: Try services table
-      console.log('📋 No service manifest found, checking services table...');
+      // Fallback: Try services table (legacy support)
+      console.log('📋 No service manifest found, checking services table as fallback...');
       const { data: serviceData, error: serviceError } = await supabaseAdmin
         .from('services')
         .select('metadata')
@@ -429,11 +428,12 @@ export async function startDynamicWorker(serviceSchema: string) {
         
       if (serviceData && !serviceError) {
         workflows = serviceData.metadata?.workflows || [];
+        console.log('📋 Using workflows from services.metadata (legacy fallback)');
       }
     }
     
     if (workflows.length === 0) {
-      throw new Error(`No workflows found for service: ${serviceSchema}`);
+      throw new Error(`No workflows found for service: ${serviceSchema}. Ensure the service has an active manifest.`);
     }
     
     console.log(`📋 Found ${workflows.length} workflows to register:`);
