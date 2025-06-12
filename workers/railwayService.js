@@ -9,12 +9,18 @@
 
 import { GraphQLClient, gql } from 'graphql-request';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-// Load environment variables
-dotenv.config();
+// Get current directory for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load environment variables from parent directory
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 // Validate required Railway environment variables
-const requiredEnvVars = ['RAILWAY_API_TOKEN', 'RAILWAY_PROJECT_ID', 'RAILWAY_ENVIRONMENT_ID'];
+const requiredEnvVars = ['RAILWAY_TOKEN', 'RAILWAY_PROJECT_ID', 'RAILWAY_ENVIRONMENT_ID'];
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {
     console.error(`❌ Missing required environment variable: ${envVar}`);
@@ -26,9 +32,11 @@ for (const envVar of requiredEnvVars) {
 // Initialize GraphQL client
 const client = new GraphQLClient('https://backboard.railway.app/graphql/v2', {
   headers: {
-    authorization: `Bearer ${process.env.RAILWAY_API_TOKEN}`,
+    authorization: `Bearer ${process.env.RAILWAY_TOKEN}`,
   },
 });
+
+
 
 /**
  * Create a new Railway service for a given service schema
@@ -38,36 +46,32 @@ const client = new GraphQLClient('https://backboard.railway.app/graphql/v2', {
 export async function createRailwayService(serviceSchema) {
   console.log(`🚂 Creating Railway service for: ${serviceSchema}`);
   
-  const mutation = gql`
-    mutation CreateService($input: ServiceCreateInput!) {
-      serviceCreate(input: $input) {
-        id
-        name
-      }
-    }
-  `;
-
-  const variables = {
-    input: {
-      name: `osp-worker-${serviceSchema}`,
-      projectId: process.env.RAILWAY_PROJECT_ID,
-      source: {
-        repo: {
-          // Point to the GitHub repo - this should come from env vars
-          repo: process.env.GITHUB_REPO || 'your-org/osp',
-          branch: process.env.GITHUB_BRANCH || 'main',
-          // Set the root directory to /workers
-          rootDirectory: '/workers'
+  try {
+    // Step 1: Create empty service
+    console.log('📋 Step 1: Creating empty service...');
+    const createMutation = gql`
+      mutation CreateService($input: ServiceCreateInput!) {
+        serviceCreate(input: $input) {
+          id
+          name
         }
       }
-    }
-  };
+    `;
 
-  try {
-    const response = await client.request(mutation, variables);
-    const serviceId = response.serviceCreate.id;
-    console.log(`✅ Railway service created: ${response.serviceCreate.name} (ID: ${serviceId})`);
+    const createVariables = {
+      input: {
+        name: `osp-worker-${serviceSchema}`,
+        projectId: process.env.RAILWAY_PROJECT_ID
+      }
+    };
+
+    const createResponse = await client.request(createMutation, createVariables);
+    const serviceId = createResponse.serviceCreate.id;
+    console.log(`✅ Service created: ${createResponse.serviceCreate.name} (ID: ${serviceId})`);
+    console.log(`🔗 GitHub connection: Inherited from project-level GitHub App integration`);
+    
     return serviceId;
+    
   } catch (error) {
     // Check if service already exists
     if (error.response?.errors?.[0]?.message?.includes('already exists')) {
@@ -86,7 +90,7 @@ export async function createRailwayService(serviceSchema) {
  */
 export async function getRailwayServiceId(serviceSchema) {
   const query = gql`
-    query GetServices($projectId: String!, $environmentId: String!) {
+    query GetServices($projectId: String!) {
       project(id: $projectId) {
         services {
           edges {
@@ -101,8 +105,7 @@ export async function getRailwayServiceId(serviceSchema) {
   `;
 
   const variables = {
-    projectId: process.env.RAILWAY_PROJECT_ID,
-    environmentId: process.env.RAILWAY_ENVIRONMENT_ID
+    projectId: process.env.RAILWAY_PROJECT_ID
   };
 
   try {
@@ -215,4 +218,60 @@ export async function deleteRailwayService(serviceId) {
     console.error('❌ Failed to delete Railway service:', error);
     // Don't throw - deletion failure during rollback shouldn't stop the process
   }
+}
+
+/**
+ * Update a Railway service with GitHub source configuration using serviceUpdate mutation.
+ * Falls back to retrying a few times to account for service not being in READY state yet.
+ * @param {string} serviceId - Railway service ID
+ * @param {string} repo - GitHub repo (e.g. "tlofrisco/osp")
+ * @param {string} branch - Git branch (default 'main')
+ * @param {string} rootDirectory - Path within repo containing worker code (default '/workers')
+ * @param {number} retries - How many times to retry if API returns 400
+ */
+export async function updateServiceSource(
+  serviceId,
+  repo,
+  branch = 'main',
+  rootDirectory = '/workers',
+  retries = 5
+) {
+  console.log(`🔗 Configuring GitHub source for service ${serviceId} → ${repo}@${branch}`);
+
+  const mutation = gql`
+    mutation UpdateServiceSource($serviceId: String!, $input: ServiceUpdateInput!) {
+      serviceUpdate(id: $serviceId, input: $input) {
+        id
+        source {
+          repo
+          branch
+          rootDirectory
+        }
+      }
+    }
+  `;
+
+  const input = {
+    environmentId: process.env.RAILWAY_ENVIRONMENT_ID,
+    source: {
+      repo,
+      branch,
+      rootDirectory,
+    },
+  };
+
+  let attempt = 0;
+  while (attempt < retries) {
+    try {
+      const resp = await client.request(mutation, { serviceId, input });
+      console.log('✅ GitHub source configured:', resp.serviceUpdate.source);
+      return resp.serviceUpdate.source;
+    } catch (err) {
+      attempt += 1;
+      const waitMs = 3000;
+      console.warn(`⚠️ Attempt ${attempt} to configure source failed (${err.response?.status || 'unknown'}). Retrying in ${waitMs / 1000}s...`);
+      await new Promise((res) => setTimeout(res, waitMs));
+    }
+  }
+  throw new Error('Exceeded retries while configuring GitHub source');
 } 

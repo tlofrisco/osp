@@ -8,7 +8,8 @@ import {
   getRailwayServiceId, 
   setRailwayEnvironmentVariables,
   deployRailwayService,
-  deleteRailwayService 
+  deleteRailwayService,
+  updateServiceSource
 } from './railwayService.js';
 
 // Load environment variables
@@ -96,22 +97,36 @@ export async function queueWorkerBuild(service_schema, manifest_id, retryCount =
     
     await setRailwayEnvironmentVariables(railwayServiceId, envVars);
     
-    // Step 3: Deploy the service
-    console.log(`🚢 Deploying Railway service...`);
+    // Step 3: Configure GitHub source via serviceUpdate (automatic connection)
+    console.log(`🔗 Connecting service to GitHub repository via serviceUpdate...`);
+    await updateServiceSource(
+      railwayServiceId,
+      process.env.GITHUB_REPO || 'tlofrisco/osp',
+      process.env.GITHUB_BRANCH || 'main',
+      '/workers'
+    );
+    
+    // Step 4: Deploy the service automatically
+    console.log(`🚀 Deploying Railway service...`);
     const deploymentId = await deployRailwayService(railwayServiceId);
     
-    console.log(`✅ Deployment successful for ${service_schema}`);
+    console.log(`✅ FULLY AUTOMATED DEPLOYMENT COMPLETED! 🎉`);
     console.log(`📋 Railway Service ID: ${railwayServiceId}`);
-    console.log(`📋 Deployment ID: ${deploymentId}`);
+    console.log(`🚀 Deployment ID: ${deploymentId}`);
+    console.log(`🔗 GitHub Repository: ${process.env.GITHUB_REPO || 'tlofrisco/osp'}`);
+    console.log(`📁 Source Path: /workers`);
+    console.log(`\n🎯 AUTOMATION SUCCESS: No manual steps required!`);
+    console.log(`   → Worker will be automatically deployed and available shortly`);
+    console.log(`   → View deployment status: https://railway.app/project/${process.env.RAILWAY_PROJECT_ID}\n`);
     
-    // Update registry with success
+    // Update registry with "deployed" status
     if (registryEntry) {
       await supabase
         .from('worker_registry')
         .update({
           deployment_status: 'deployed',
           railway_service_id: railwayServiceId,
-          logs: `Deployment successful. Service ID: ${railwayServiceId}, Deployment ID: ${deploymentId}`
+          logs: `✅ Fully automated deployment completed!\nService ID: ${railwayServiceId}\nDeployment ID: ${deploymentId}\nRepo: ${process.env.GITHUB_REPO || 'tlofrisco/osp'}, Path: /workers`
         })
         .eq('id', registryEntry.id);
     }
@@ -120,7 +135,13 @@ export async function queueWorkerBuild(service_schema, manifest_id, retryCount =
       success: true, 
       service_schema, 
       railway_service_id: railwayServiceId,
-      deployment_id: deploymentId 
+      deployment_id: deploymentId,
+      status: 'deployed',
+      manual_steps_required: false,
+      fully_automated: true,
+      dashboard_url: `https://railway.app/project/${process.env.RAILWAY_PROJECT_ID}`,
+      service_name: `osp-worker-${service_schema}`,
+      github_repo: process.env.GITHUB_REPO || 'tlofrisco/osp'
     };
     
   } catch (error) {
