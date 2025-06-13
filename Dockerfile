@@ -1,21 +1,24 @@
-# Use specific Node version known to work well with Temporal
-FROM node:18-bullseye
+# Clean Temporal Worker Dockerfile - Based on Railway Best Practices
+FROM node:18-slim
 
 # Set working directory
 WORKDIR /app
 
-# Copy workers package files and install dependencies
-COPY workers/package*.json ./workers/
-WORKDIR /app/workers
-RUN npm ci --production
+# Copy package files
+COPY package*.json ./
 
-# Copy source files to correct locations
-WORKDIR /app
-COPY workers/ ./workers/
-COPY workflows/ ./workflows/
+# Install dependencies
+RUN npm ci --only=production
 
-# Set proper permissions
-RUN chmod +x workers/*.js
+# Copy application code
+COPY . .
 
-# Start the unified worker (railway.json expects workers/unified-worker.js)
-CMD ["node", "workers/unified-worker.js"] 
+# Create non-root user
+RUN useradd -r -s /bin/false temporal
+USER temporal
+
+# Health check endpoint
+EXPOSE 3000
+
+# Start the worker
+CMD ["npm", "start"] 

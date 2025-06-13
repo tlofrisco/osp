@@ -1,42 +1,24 @@
 {
-	"name": "osp-monorepo",
-	"version": "1.0.0",
-	"private": true,
-	"scripts": {
-		"dev": "vite dev --logLevel info",
-		"build": "vite build",
-		"preview": "vite preview",
-		"prepare": "svelte-kit sync",
-		"workers": "tsx scripts/start-workers.ts",
-		"worker": "cd workers && node launch-worker.js",
-		"worker-standalone": "node workers/standalone-worker.js"
-	},
-	"devDependencies": {
-		"@sveltejs/adapter-vercel": "^5.4.0",
-		"@sveltejs/kit": "^2.20.2",
-		"@sveltejs/vite-plugin-svelte": "^3.1.2",
-		"@tsconfig/svelte": "^5.0.4",
-		"svelte": "^4.2.19",
-		"tsx": "^4.19.4",
-		"typescript": "^5.8.2",
-		"vite": "^5.4.8"
-	},
-	"dependencies": {
-		"@supabase/ssr": "^0.6.1",
-		"@supabase/supabase-js": "^2.45.4",
-		"@temporalio/activity": "^1.11.8",
-		"@temporalio/client": "^1.11.8",
-		"@temporalio/worker": "^1.11.8",
-		"@temporalio/workflow": "^1.11.8",
-		"dotenv": "^16.4.5",
-		"lucide-svelte": "^0.513.0",
-		"markdown-it": "^14.1.0",
-		"node-fetch": "^3.3.2",
-		"octokit": "^4.1.3",
-		"openai": "^4.96.0"
-	},
-	"type": "module",
-	"engines": {
-		"node": ">=18.x"
-	}
-}
+  "name": "osp-temporal-worker",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Clean OSP Temporal Worker for Railway",
+  "main": "simple-temporal-worker.js",
+  "scripts": {
+    "start": "node simple-temporal-worker.js",
+    "dev": "node simple-temporal-worker.js"
+  },
+  "dependencies": {
+    "@temporalio/worker": "^1.10.0",
+    "@temporalio/workflow": "^1.10.0", 
+    "@temporalio/activity": "^1.10.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["temporal", "worker", "railway", "osp"],
+  "author": "OSP Team",
+  "license": "MIT"
+} 

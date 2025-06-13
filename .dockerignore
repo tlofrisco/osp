@@ -1,11 +1,47 @@
+# Ignore local dependencies
 node_modules
-.git
-.DS_Store
+
+# Ignore logs
+npm-debug.log
 *.log
-tmp/
-.cache/
-.vercel/
-.svelte-kit/
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore Git
+.git
+
+# Ignore development environment files
+.vscode
+.idea
+.fleet
+
+# Ignore platform-specific deployment files that might conflict
+.vercel
+.netlify
+
+# Ignore build artifacts from other tools
+.svelte-kit
+/build
+/dist
+
+# Ignore the Dockerfile itself and this ignore file
+Dockerfile
+.dockerignore
+Dockerfile.fixed
+
+# Ignore test and markdown files
+*clean*
+*temp*
+*.md
+fly.toml
+set-fly-secrets.ps1
+set-railway-vars.js
+test-core-bridge.js
+
+# Ensure no nested node_modules are ever included
+**/node_modules
 
 # Include manifests for worker deployment
 !manifests/
