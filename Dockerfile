@@ -1,12 +1,12 @@
-# Use Debian-based image to support Temporal native modules
-FROM node:20-bullseye
+# Use Alpine for better native module compatibility
+FROM node:20-alpine
 
 # Install build dependencies for native modules
-RUN apt-get update && apt-get install -y \
+RUN apk add --no-cache \
     python3 \
     make \
     g++ \
-    && rm -rf /var/lib/apt/lists/*
+    libc6-compat
 
 # Set working directory
 WORKDIR /app
@@ -14,9 +14,11 @@ WORKDIR /app
 # Copy workers package files first (for dependencies)
 COPY workers/package*.json ./workers/
 
-# Install dependencies from workers directory and rebuild native modules
+# Install dependencies and force clean install of native modules
 WORKDIR /app/workers
-RUN npm ci --production && npm rebuild
+RUN npm ci --production && \
+    rm -rf node_modules/@temporalio/core-bridge && \
+    npm install @temporalio/core-bridge --force
 
 # Copy all source files
 WORKDIR /app
@@ -26,5 +28,5 @@ COPY workflows/ ./workflows/
 # Copy root package.json for the start script
 COPY package.json ./
 
-# Start the unified worker directly (bypass npm prepare script)
+# Start the unified worker directly
 CMD ["node", "workers/unified-worker.js"] 
