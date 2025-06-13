@@ -1,32 +1,19 @@
-# Use Alpine for better native module compatibility
-FROM node:20-alpine
-
-# Install build dependencies for native modules
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++ \
-    libc6-compat
+# Use specific Node version known to work well with Temporal
+FROM node:18-bullseye
 
 # Set working directory
 WORKDIR /app
 
-# Copy workers package files first (for dependencies)
-COPY workers/package*.json ./workers/
+# Copy workers package files and install dependencies
+COPY workers/package*.json ./
+RUN npm ci --production
 
-# Install dependencies and force clean install of native modules
-WORKDIR /app/workers
-RUN npm ci --production && \
-    rm -rf node_modules/@temporalio/core-bridge && \
-    npm install @temporalio/core-bridge --force
+# Copy source files
+COPY workers/ ./
+COPY workflows/ ../workflows/
 
-# Copy all source files
-WORKDIR /app
-COPY workers/ ./workers/
-COPY workflows/ ./workflows/
+# Set proper permissions
+RUN chmod +x *.js
 
-# Copy root package.json for the start script
-COPY package.json ./
-
-# Start the unified worker directly
-CMD ["node", "workers/unified-worker.js"] 
+# Start the unified worker
+CMD ["node", "unified-worker.js"] 
