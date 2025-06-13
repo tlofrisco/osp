@@ -22,5 +22,5 @@ WORKDIR /app/workers
 # Make scripts executable
 RUN chmod +x *.js || true
 
-# Start the worker using launch-worker.js (reads from MANIFEST_ID env var)
-CMD ["node", "launch-worker.js"] 
+# Start the unified worker that handles all service types
+CMD ["node", "unified-worker.js"] 
