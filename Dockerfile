@@ -4,16 +4,20 @@ FROM node:20-bullseye
 # Set working directory
 WORKDIR /app
 
-# Copy root package files first (for better caching)
-COPY package*.json ./
+# Copy workers package files first (for dependencies)
+COPY workers/package*.json ./workers/
 
-# Install dependencies from root
+# Install dependencies from workers directory (has the right deps)
+WORKDIR /app/workers
 RUN npm ci --production || npm install --production
 
 # Copy all source files
+WORKDIR /app
 COPY workers/ ./workers/
 COPY workflows/ ./workflows/
-COPY src/ ./src/
 
-# Start the unified worker using root package.json
-CMD ["npm", "start"] 
+# Copy root package.json for the start script
+COPY package.json ./
+
+# Start the unified worker directly (bypass npm prepare script)
+CMD ["node", "workers/unified-worker.js"] 
