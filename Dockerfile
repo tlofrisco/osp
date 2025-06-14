@@ -11,25 +11,25 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files first (for better cache efficiency)
 COPY package*.json ./
 
-# Install dependencies using the lockfile for consistency
+# Install dependencies
 RUN npm ci
 
 # Copy all application source code
 COPY . .
 
-# ✅ ADD THIS LINE to copy the downloaded certificates into the image
+# ✅ Copy certs directory before changing user
 COPY ./certs /app/certs
 
-# Create and switch to a non-root user for better security
-RUN useradd -r -s /bin/false temporal
-RUN chown -R temporal:temporal /app
+# Create and use a non-root user for security
+RUN useradd -r -s /bin/false temporal && \
+    chown -R temporal:temporal /app
 USER temporal
 
 # Expose the health check port
 EXPOSE 3000
 
-# Start the worker using the npm script
+# Start the worker
 CMD ["npm", "start"]
