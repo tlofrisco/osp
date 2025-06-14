@@ -165,9 +165,12 @@ async function run() {
     console.log(`🌐 Namespace: ${process.env.TEMPORAL_NAMESPACE}`);
     console.log(`🏠 Address: ${process.env.TEMPORAL_ADDRESS}`);
     
-    // This will run indefinitely until shutdown
-    await worker.run();
+    // 🛑 TEMPORARILY COMMENT OUT THE WORKER RUN COMMAND
+    // await worker.run();
     
+    // ✅ ADD THIS LINE TO KEEP THE CONTAINER ALIVE FOR DEBUGGING
+    await new Promise(() => {}); // This creates a promise that never resolves, keeping the Node.js process alive
+
   } catch (error) {
     console.error('❌ Failed to start worker:', error);
     
