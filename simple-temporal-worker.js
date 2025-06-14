@@ -6,7 +6,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs'; // ✅ File system for certs
+import fs from 'fs';
 
 dotenv.config();
 
@@ -46,20 +46,19 @@ async function run() {
   });
 
   try {
-    // ✅ Read certs and validate they are available
+    // ✅ Load only root CA cert (simplified and valid for Temporal Cloud)
     const caCertPath = '/app/certs/ca.pem';
-    const intermediateCertPath = '/app/certs/ca-intermediate.pem';
 
-    if (!fs.existsSync(caCertPath) || !fs.existsSync(intermediateCertPath)) {
-      throw new Error(`❌ One or both cert files missing: ${caCertPath}, ${intermediateCertPath}`);
+    if (!fs.existsSync(caCertPath)) {
+      throw new Error(`❌ Missing CA certificate: ${caCertPath}`);
     }
 
     const caCert = fs.readFileSync(caCertPath);
-    const intermediateCert = fs.readFileSync(intermediateCertPath);
-
     console.log(`🔐 CA cert length: ${caCert.length}`);
-    console.log(`🔐 Intermediate cert length: ${intermediateCert.length}`);
-    console.log(`ℹ️  Using SNI override value: ${process.env.TEMPORAL_NAMESPACE}`);
+
+    // ✅ Derive SNI value from TEMPORAL_ADDRESS
+    const sniHost = process.env.TEMPORAL_ADDRESS.split(':')[0];
+    console.log(`ℹ️  Using SNI override value: ${sniHost}`);
     console.log(`🔌 Connecting to Temporal Cloud with explicit TLS and timeout...`);
 
     const connection = await Connection.connect({
@@ -67,8 +66,8 @@ async function run() {
       apiKey: process.env.TEMPORAL_API_KEY,
       connectTimeout: '30s',
       tls: {
-        serverRootCACertificate: Buffer.concat([caCert, intermediateCert]),
-        serverNameOverride: process.env.TEMPORAL_NAMESPACE,
+        serverRootCACertificate: caCert,
+        serverNameOverride: sniHost,
       },
     });
 
