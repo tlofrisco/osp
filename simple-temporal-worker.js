@@ -1,114 +1,113 @@
 #!/usr/bin/env node
 
-/**
- * Clean OSP Temporal Worker
- * 
- * Based on Temporal + Railway industry standards
- * Simple, direct approach with zero custom abstractions
- */
-
 import { Worker } from '@temporalio/worker';
-import { createClient } from '@supabase/supabase-js';
+// import { createClient } from '@supabase/supabase-js'; // Commented out for now
+import express from 'express';
 import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
+// --- Configuration ---
 dotenv.config();
 
-console.log('🚀 Starting Clean OSP Temporal Worker...');
+const PORT = process.env.PORT || 3000;
+const TASK_QUEUE = 'osp-queue';
 
-// Simple environment validation
 const requiredVars = [
   'TEMPORAL_ADDRESS',
-  'TEMPORAL_NAMESPACE', 
+  'TEMPORAL_NAMESPACE',
   'TEMPORAL_API_KEY',
-  'PUBLIC_SUPABASE_URL',
-  'SUPABASE_SERVICE_ROLE_KEY'
+  // Commenting out Supabase vars for now
+  // 'PUBLIC_SUPABASE_URL',
+  // 'SUPABASE_SERVICE_ROLE_KEY'
 ];
-
-const missing = requiredVars.filter(v => !process.env[v]);
+const missing = requiredVars.filter((v) => !process.env[v]);
 if (missing.length > 0) {
-  console.error('❌ Missing environment variables:', missing);
+  console.error('❌ Missing critical environment variables:', missing);
   process.exit(1);
 }
 
-// Simple Supabase client
-const supabase = createClient(
-  process.env.PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+// ✅ Supabase admin client (commented out for now)
+// const supabaseAdmin = createClient(
+//   process.env.PUBLIC_SUPABASE_URL,
+//   process.env.SUPABASE_SERVICE_ROLE_KEY
+// );
 
-// Simple activities (minimal example)
+// ✅ Activities (with mock implementation)
 const activities = {
-  async createEntity(data) {
-    console.log('📝 Creating entity:', data);
+  async createEntityInService(serviceSchema, entityName, data) {
+    console.log(`📝 Mock: Would insert into ${serviceSchema}.${entityName} with data:`, data);
+
+    // 🔥 MOCK IMPLEMENTATION - Replace with real Supabase call later
+    // const { data: result, error } = await supabaseAdmin
+    //   .rpc('insert_into_dynamic_table', { service_schema: serviceSchema, table_name: entityName, row_data: data })
+    //   .single();
+
+    // if (error) {
+    //   console.error(`❌ Supabase insert failed for ${serviceSchema}.${entityName}:`, error);
+    //   throw error;
+    // }
     
-    const { data: result, error } = await supabase
-      .from('services')
-      .insert(data)
-      .select()
-      .single();
+    // Mock successful result
+    const mockResult = {
+      id: Math.floor(Math.random() * 1000),
+      serviceSchema,
+      entityName,
+      data,
+      created_at: new Date().toISOString()
+    };
     
-    if (error) throw error;
-    return result;
+    console.log(`✅ Mock: Successfully "created" entity:`, mockResult);
+    return mockResult;
   }
 };
 
-// Simple workflows
-const workflows = `
-import { proxyActivities } from '@temporalio/workflow';
+// --- Main Run ---
+async function run() {
+  // Health check server
+  const app = express();
+  const healthServer = app.listen(PORT, () =>
+    console.log(`🏥 Health check server listening on port ${PORT}`)
+  );
+  app.get('/health', (_, res) => res.status(200).send('OK'));
 
-const { createEntity } = proxyActivities({
-  startToCloseTimeout: '30s',
-});
+  // Temporal Worker
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const workflowsPath = path.join(__dirname, 'workflows.js');
 
-export async function createServiceWorkflow(serviceData) {
-  return await createEntity(serviceData);
-}
-`;
+  const worker = await Worker.create({
+    connection: {
+      address: process.env.TEMPORAL_ADDRESS,
+      apiKey: process.env.TEMPORAL_API_KEY,
+    },
+    namespace: process.env.TEMPORAL_NAMESPACE,
+    taskQueue: TASK_QUEUE,
+    workflowsPath,
+    activities,
+    maxConcurrentActivityTaskExecutions: 10,
+    maxConcurrentWorkflowTaskExecutions: 10,
+  });
 
-async function main() {
+  const shutdown = async () => {
+    console.log('🛑 Shutting down gracefully...');
+    await worker.shutdown();
+    healthServer.close(() => console.log('🔌 Health server shut down.'));
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+
   try {
-    console.log('🔧 Connecting to Temporal...');
-    console.log(`📡 Address: ${process.env.TEMPORAL_ADDRESS}`);
-    console.log(`🏢 Namespace: ${process.env.TEMPORAL_NAMESPACE}`);
-    
-    // ES modules path resolution
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const workflowsPath = path.join(__dirname, 'workflows.js');
-    
-    const worker = await Worker.create({
-      connection: {
-        address: process.env.TEMPORAL_ADDRESS,
-        tls: {
-          clientCertPair: undefined
-        },
-        apiKey: process.env.TEMPORAL_API_KEY
-      },
-      namespace: process.env.TEMPORAL_NAMESPACE,
-      taskQueue: 'osp-queue',
-      workflowsPath: workflowsPath,
-      activities,
-      maxConcurrentActivityTaskExecutions: 10,
-      maxConcurrentWorkflowTaskExecutions: 10,
-    });
-
-    console.log('✅ Worker configured successfully!');
-    console.log('🏃 Starting worker execution...');
-    
+    console.log('🏃 Worker configured successfully! Starting execution...');
     await worker.run();
-    
-  } catch (error) {
-    console.error('❌ Worker failed:', error);
+  } catch (err) {
+    console.error('❌ Worker crashed:', err);
     process.exit(1);
   }
 }
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('🛑 Shutting down gracefully...');
-  process.exit(0);
+run().catch((err) => {
+  console.error('❌ Failed to start application:', err);
+  process.exit(1);
 });
-
-main(); 

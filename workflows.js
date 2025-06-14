@@ -1,23 +1,23 @@
 import { proxyActivities } from '@temporalio/workflow';
 
-// Simple activity proxy
-const { createEntity } = proxyActivities({
+// Activity proxy matching the worker's activity definition
+const { createEntityInService } = proxyActivities({
   startToCloseTimeout: '30s',
   retryPolicy: {
     maximumAttempts: 3,
   },
 });
 
-// Clean workflow implementation
-export async function createServiceWorkflow(serviceData) {
-  console.log(`🔄 Starting workflow for service: ${serviceData.name}`);
+// Updated workflow implementation to match the activity signature
+export async function createServiceWorkflow(serviceSchema, entityName, data) {
+  console.log(`🔄 Starting workflow for ${serviceSchema}.${entityName}`);
   
   try {
-    const result = await createEntity(serviceData);
-    console.log(`✅ Service created successfully: ${result.id}`);
+    const result = await createEntityInService(serviceSchema, entityName, data);
+    console.log(`✅ Entity created successfully in ${serviceSchema}.${entityName}:`, result);
     return result;
   } catch (error) {
-    console.error(`❌ Workflow failed: ${error.message}`);
+    console.error(`❌ Workflow failed for ${serviceSchema}.${entityName}: ${error.message}`);
     throw error;
   }
 } 
