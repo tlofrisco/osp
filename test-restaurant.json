@@ -1,5 +1,0 @@
-{
-  "problem": "A mid-size restaurant management system",
-  "requirements": "Order management, table reservations, inventory tracking, customer loyalty program, staff scheduling, menu management, payment processing, kitchen workflow, customer feedback",
-  "frameworks": ["TMForumSID", "ARTS"]
-} 
