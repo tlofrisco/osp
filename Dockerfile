@@ -1,7 +1,7 @@
-# Clean Temporal Worker Dockerfile - Based on Railway Best Practices
+# Final Dockerfile
 FROM node:20-slim
 
-# Install build dependencies for native modules
+# Install build dependencies
 RUN apt-get update && apt-get install -y \
     python3 \
     make \
@@ -14,19 +14,22 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install ALL dependencies (needed for native module compilation)
+# Install dependencies using the lockfile for consistency
 RUN npm ci
 
-# Copy application code
+# Copy all application source code
 COPY . .
 
-# Create non-root user
+# ✅ ADD THIS LINE to copy the downloaded certificates into the image
+COPY ./certs /app/certs
+
+# Create and switch to a non-root user for better security
 RUN useradd -r -s /bin/false temporal
 RUN chown -R temporal:temporal /app
 USER temporal
 
-# Health check endpoint
+# Expose the health check port
 EXPOSE 3000
 
-# Start the worker
+# Start the worker using the npm script
 CMD ["npm", "start"]

@@ -2,11 +2,11 @@
 
 import { Worker } from '@temporalio/worker';
 import { Connection } from '@temporalio/client';
-// import { createClient } from '@supabase/supabase-js'; // Commented out for now
 import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs'; // ✅ 1. IMPORT THE FILE SYSTEM MODULE
 
 // --- Configuration ---
 dotenv.config();
@@ -18,9 +18,6 @@ const requiredVars = [
   'TEMPORAL_ADDRESS',
   'TEMPORAL_NAMESPACE',
   'TEMPORAL_API_KEY',
-  // Commenting out Supabase vars for now
-  // 'PUBLIC_SUPABASE_URL',
-  // 'SUPABASE_SERVICE_ROLE_KEY'
 ];
 
 const missing = requiredVars.filter((v) => !process.env[v]);
@@ -29,17 +26,10 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-// ✅ Activities (with mock implementation)
 const activities = {
   async createEntityInService(serviceSchema, entityName, data) {
     console.log(`📝 Mock: Would insert into ${serviceSchema}.${entityName} with data:`, data);
-    const mockResult = {
-      id: Math.floor(Math.random() * 1000),
-      serviceSchema,
-      entityName,
-      data,
-      created_at: new Date().toISOString()
-    };
+    const mockResult = { id: Math.floor(Math.random() * 1000), created_at: new Date().toISOString() };
     console.log(`✅ Mock: Successfully "created" entity:`, mockResult);
     return mockResult;
   }
@@ -48,30 +38,38 @@ const activities = {
 // --- Main Run ---
 async function run() {
   console.log('🚀 Starting OSP Temporal Worker...');
-  
+
   const app = express();
   app.get('/health', (_, res) => {
-    console.log('🏥 Health check requested');
-    res.status(200).json({ status: 'healthy', worker: 'initializing' });
+    res.status(200).json({ status: 'healthy' });
   });
-  
+
   const healthServer = app.listen(PORT, () => {
     console.log(`🏥 Health check server listening on port ${PORT}`);
   });
 
   try {
-    console.log('🔌 Connecting to Temporal Cloud...');
+    // ✅ 2. READ THE CERTIFICATE FILES
+    const caCert = fs.readFileSync('/app/certs/ca.pem');
+    const intermediateCert = fs.readFileSync('/app/certs/ca-intermediate.pem');
+
+    console.log('🔌 Connecting to Temporal Cloud with explicit TLS configuration...');
     const connection = await Connection.connect({
       address: process.env.TEMPORAL_ADDRESS,
       apiKey: process.env.TEMPORAL_API_KEY,
+      // ✅ 3. ADD THIS TLS CONFIGURATION BLOCK
+      tls: {
+        // Pass the CA certificates to trust the Temporal Cloud server
+        serverRootCACertificate: Buffer.concat([caCert, intermediateCert]),
+        // Provide the server name for SNI, matching the certificate
+        serverNameOverride: process.env.TEMPORAL_ADDRESS.split(':')[0],
+      },
     });
-    console.log('✅ Connected to Temporal Cloud successfully');
+    console.log('✅ Connected to Temporal Cloud successfully!');
 
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
     const workflowsPath = path.join(__dirname, 'workflows.js');
-    
-    console.log('📁 Workflows path:', workflowsPath);
 
     console.log('👷 Creating Temporal worker...');
     const worker = await Worker.create({
@@ -80,44 +78,25 @@ async function run() {
       taskQueue: TASK_QUEUE,
       workflowsPath,
       activities,
-      maxConcurrentActivityTaskExecutions: 5,
-      maxConcurrentWorkflowTaskExecutions: 5,
-      shutdownGraceTimeMs: 10000,
-      maxHeartbeatThrottleIntervalMs: 60000,
-      defaultHeartbeatThrottleIntervalMs: 30000,
     });
+    console.log('✅ Worker created successfully.');
 
-    console.log('✅ Worker created successfully');
-
-    // Update health check for running worker
-    app.get('/health', (_, res) => {
-      res.status(200).json({ status: 'healthy', worker: 'running' });
-    });
-
+    // Graceful shutdown handling
     const shutdown = async () => { /* ... your shutdown logic ... */ };
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
-    process.on('unhandledRejection', (reason, promise) => { /* ... */ });
-    process.on('uncaughtException', (error) => { /* ... */ });
 
-    console.log('🏃 Starting worker execution...');
-    console.log(`📋 Task Queue: ${TASK_QUEUE}`);
-    console.log(`🌐 Namespace: ${process.env.TEMPORAL_NAMESPACE}`);
-    console.log(`🏠 Address: ${process.env.TEMPORAL_ADDRESS}`);
-    
-    // ✅ RE-ENABLE THE WORKER RUN COMMAND
+    console.log(`🏃 Starting worker on task queue: ${TASK_QUEUE}...`);
+    // ✅ 4. RUN THE WORKER NORMALLY
     await worker.run();
-    
+
   } catch (error) {
     console.error('❌ Failed to start worker:', error);
-    if (error.code) { console.error('Error Code:', error.code); }
-    if (error.details) { console.error('Error Details:', error.details); }
     healthServer.close();
     process.exit(1);
   }
 }
 
-// Start the application
 run().catch((err) => {
   console.error('❌ Failed to start application:', err);
   process.exit(1);
