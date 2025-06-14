@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Worker } from '@temporalio/worker';
+import { Connection } from '@temporalio/client';
 // import { createClient } from '@supabase/supabase-js'; // Commented out for now
 import express from 'express';
 import dotenv from 'dotenv';
@@ -21,6 +22,7 @@ const requiredVars = [
   // 'PUBLIC_SUPABASE_URL',
   // 'SUPABASE_SERVICE_ROLE_KEY'
 ];
+
 const missing = requiredVars.filter((v) => !process.env[v]);
 if (missing.length > 0) {
   console.error('❌ Missing critical environment variables:', missing);
@@ -37,12 +39,12 @@ if (missing.length > 0) {
 const activities = {
   async createEntityInService(serviceSchema, entityName, data) {
     console.log(`📝 Mock: Would insert into ${serviceSchema}.${entityName} with data:`, data);
-
+    
     // 🔥 MOCK IMPLEMENTATION - Replace with real Supabase call later
     // const { data: result, error } = await supabaseAdmin
     //   .rpc('insert_into_dynamic_table', { service_schema: serviceSchema, table_name: entityName, row_data: data })
     //   .single();
-
+    
     // if (error) {
     //   console.error(`❌ Supabase insert failed for ${serviceSchema}.${entityName}:`, error);
     //   throw error;
@@ -64,49 +66,125 @@ const activities = {
 
 // --- Main Run ---
 async function run() {
-  // Health check server
+  console.log('🚀 Starting OSP Temporal Worker...');
+  
+  // Health check server FIRST
   const app = express();
-  const healthServer = app.listen(PORT, () =>
-    console.log(`🏥 Health check server listening on port ${PORT}`)
-  );
-  app.get('/health', (_, res) => res.status(200).send('OK'));
-
-  // Temporal Worker
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  const workflowsPath = path.join(__dirname, 'workflows.js');
-
-  const worker = await Worker.create({
-    connection: {
-      address: process.env.TEMPORAL_ADDRESS,
-      apiKey: process.env.TEMPORAL_API_KEY,
-    },
-    namespace: process.env.TEMPORAL_NAMESPACE,
-    taskQueue: TASK_QUEUE,
-    workflowsPath,
-    activities,
-    maxConcurrentActivityTaskExecutions: 10,
-    maxConcurrentWorkflowTaskExecutions: 10,
+  app.get('/health', (_, res) => {
+    console.log('🏥 Health check requested');
+    res.status(200).json({ 
+      status: 'healthy', 
+      timestamp: new Date().toISOString(),
+      worker: 'initializing'
+    });
+  });
+  
+  const healthServer = app.listen(PORT, () => {
+    console.log(`🏥 Health check server listening on port ${PORT}`);
   });
 
-  const shutdown = async () => {
-    console.log('🛑 Shutting down gracefully...');
-    await worker.shutdown();
-    healthServer.close(() => console.log('🔌 Health server shut down.'));
-  };
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-
   try {
-    console.log('🏃 Worker configured successfully! Starting execution...');
+    // Create connection with proper error handling
+    console.log('🔌 Connecting to Temporal Cloud...');
+    const connection = await Connection.connect({
+      address: process.env.TEMPORAL_ADDRESS,
+      apiKey: process.env.TEMPORAL_API_KEY,
+    });
+    console.log('✅ Connected to Temporal Cloud successfully');
+
+    // Get current directory for workflows
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const workflowsPath = path.join(__dirname, 'workflows.js');
+    
+    console.log('📁 Workflows path:', workflowsPath);
+
+    // Create worker with connection
+    console.log('👷 Creating Temporal worker...');
+    const worker = await Worker.create({
+      connection,
+      namespace: process.env.TEMPORAL_NAMESPACE,
+      taskQueue: TASK_QUEUE,
+      workflowsPath,
+      activities,
+      maxConcurrentActivityTaskExecutions: 5,
+      maxConcurrentWorkflowTaskExecutions: 5,
+      // Add some additional configuration for stability
+      shutdownGraceTimeMs: 10000,
+      maxHeartbeatThrottleIntervalMs: 60000,
+      defaultHeartbeatThrottleIntervalMs: 30000,
+    });
+
+    console.log('✅ Worker created successfully');
+
+    // Update health check to show worker is ready
+    app.get('/health', (_, res) => {
+      res.status(200).json({ 
+        status: 'healthy', 
+        timestamp: new Date().toISOString(),
+        worker: 'running',
+        taskQueue: TASK_QUEUE,
+        namespace: process.env.TEMPORAL_NAMESPACE
+      });
+    });
+
+    // Graceful shutdown handling
+    const shutdown = async () => {
+      console.log('🛑 Shutting down gracefully...');
+      try {
+        await worker.shutdown();
+        console.log('✅ Worker shut down successfully');
+        
+        healthServer.close(() => {
+          console.log('🔌 Health server shut down');
+          process.exit(0);
+        });
+      } catch (error) {
+        console.error('❌ Error during shutdown:', error);
+        process.exit(1);
+      }
+    };
+
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+    process.on('SIGQUIT', shutdown);
+
+    // Handle uncaught exceptions
+    process.on('uncaughtException', (error) => {
+      console.error('💥 Uncaught Exception:', error);
+      shutdown();
+    });
+
+    process.on('unhandledRejection', (reason, promise) => {
+      console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+      shutdown();
+    });
+
+    console.log('🏃 Starting worker execution...');
+    console.log(`📋 Task Queue: ${TASK_QUEUE}`);
+    console.log(`🌐 Namespace: ${process.env.TEMPORAL_NAMESPACE}`);
+    console.log(`🏠 Address: ${process.env.TEMPORAL_ADDRESS}`);
+    
+    // This will run indefinitely until shutdown
     await worker.run();
-  } catch (err) {
-    console.error('❌ Worker crashed:', err);
+    
+  } catch (error) {
+    console.error('❌ Failed to start worker:', error);
+    
+    // Log more details about the error
+    if (error.code) {
+      console.error('Error Code:', error.code);
+    }
+    if (error.details) {
+      console.error('Error Details:', error.details);
+    }
+    
+    healthServer.close();
     process.exit(1);
   }
 }
 
+// Start the application
 run().catch((err) => {
   console.error('❌ Failed to start application:', err);
   process.exit(1);

@@ -10,15 +10,15 @@
   },
   "dependencies": {
     "@temporalio/worker": "^1.10.0",
-    "@temporalio/workflow": "^1.10.0", 
+    "@temporalio/workflow": "^1.10.0",
     "@temporalio/activity": "^1.10.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2"
   },
   "engines": {
-    "node": ">=18.x"
+    "node": ">=20.x"
   },
   "keywords": ["temporal", "worker", "railway", "osp"],
   "author": "OSP Team",
   "license": "MIT"
-} 
+}
