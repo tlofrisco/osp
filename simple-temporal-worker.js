@@ -46,8 +46,10 @@ async function run() {
   });
 
   try {
-    // ✅ Load only root CA cert (simplified and valid for Temporal Cloud)
-    const caCertPath = '/app/certs/ca.pem';
+    // ✅ Load only root CA cert (works for both local and Docker)
+    const caCertPath = fs.existsSync('/app/certs/ca.pem') 
+      ? '/app/certs/ca.pem'         // Docker environment
+      : './certs/ca.pem';           // Local environment
 
     if (!fs.existsSync(caCertPath)) {
       throw new Error(`❌ Missing CA certificate: ${caCertPath}`);
